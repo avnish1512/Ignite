@@ -20,16 +20,22 @@ import {
 import { useCallback } from 'react';
 import { useAuth } from '@/hooks/auth-store';
 import { useJobs } from '@/hooks/jobs-store';
+import { db } from '@/config/firebase';
+import { collection, getCountFromServer } from 'firebase/firestore';
 
 export default function AdminDashboard() {
   const { admin, logout } = useAuth();
   const { jobs, applications, deleteJob, loadData } = useJobs();
-  
-  // Refresh jobs whenever this screen comes into focus
+  const [studentCount, setStudentCount] = React.useState(0);
+
+  // Refresh jobs + student count whenever screen comes into focus
   useFocusEffect(
     useCallback(() => {
-      console.log('📊 Admin Dashboard focused - refreshing jobs data');
       loadData();
+      // Fetch real student count from Firestore
+      getCountFromServer(collection(db, 'students'))
+        .then(snap => setStudentCount(snap.data().count))
+        .catch(() => setStudentCount(0));
     }, [loadData])
   );
   
@@ -39,7 +45,7 @@ export default function AdminDashboard() {
   const stats = {
     totalJobs: jobs.length,
     totalApplications: totalApplications,
-    activeStudents: new Set(applications.map(app => app.studentId)).size,
+    activeStudents: studentCount,          // Real count from Firestore
     companiesRegistered: uniqueCompanies
   };
 

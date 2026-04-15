@@ -1,6 +1,8 @@
 import createContextHook from '@nkzw/create-context-hook';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useState, useEffect, useCallback } from 'react';
+import { Alert } from 'react-native';
+
 import { Student } from '@/types/job';
 import { auth, db } from '@/config/firebase';
 import { DEFAULT_ADMIN_ID } from '@/constants/admin';
@@ -54,6 +56,23 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
             await AsyncStorage.setItem('user', JSON.stringify(adminUser));
             setUser(adminUser);
           } else {
+            // Check if student was permanently deleted by admin
+            const deletedCheck = await getDoc(doc(db, 'deleted_students', firebaseUser.uid));
+            if (deletedCheck.exists()) {
+              // Student was deleted — sign them out immediately
+              console.log('Blocked deleted student from logging in:', firebaseUser.email);
+              await signOut(auth);
+              await AsyncStorage.removeItem('user');
+              setUser(null);
+              setIsLoading(false);
+              Alert.alert(
+                'Account Removed',
+                'Your account has been removed. Please contact the admin.',
+                [{ text: 'OK' }]
+              );
+              return;
+            }
+
             // Load student profile from Firestore
             const studentDoc = await getDoc(doc(db, 'students', firebaseUser.uid));
             if (studentDoc.exists()) {
@@ -62,7 +81,9 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
               setUser(studentData);
               console.log('Loaded student profile:', studentData.name);
             } else {
-              // Create basic student profile if not exists
+              // Doc doesn't exist — could be a brand-new admin-created account
+              // Create a minimal placeholder doc so auth-store has something to work with
+              // profileCompleted: false will route them to profile-setup
               const basicStudent: Student = {
                 id: firebaseUser.uid,
                 name: firebaseUser.displayName || 'Student',
@@ -72,11 +93,9 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
                 year: '',
                 cgpa: 0,
                 skills: [],
-                resume: '',
-                address: '',
                 profileCompleted: false,
               };
-              await setDoc(doc(db, 'students', firebaseUser.uid), basicStudent);
+              await setDoc(doc(db, 'students', firebaseUser.uid), basicStudent, { merge: true });
               await AsyncStorage.setItem('user', JSON.stringify(basicStudent));
               setUser(basicStudent);
             }

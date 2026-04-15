@@ -7,11 +7,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, router, useFocusEffect } from 'expo-router';
 import {
   ArrowLeft, Search, Users, GraduationCap, MapPin,
-  RefreshCw, Mail, Phone
+  RefreshCw, Mail, Phone, Trash2, UserX
 } from 'lucide-react-native';
 import { db } from '@/config/firebase';
 import {
-  collection, getDocs, doc, updateDoc, query, orderBy
+  collection, getDocs, doc, updateDoc, setDoc, deleteDoc, query, orderBy
 } from 'firebase/firestore';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -30,6 +30,7 @@ type Student = {
   createdAt?: string;
   profileCompleted?: boolean;
   enrollmentNo?: string;
+  prnNumber?: string;
   skills?: string[];
 };
 
@@ -94,6 +95,45 @@ export default function AdminManageStudents() {
     } finally {
       setUpdatingId(null);
     }
+  };
+
+  const handleDeleteStudent = (student: Student) => {
+    Alert.alert(
+      '⚠️ Delete Student Permanently',
+      `This will permanently delete "${student.name}" (${student.email}) from the system.\n\nThey will no longer be able to log in.\n\nThis cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Permanently',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setUpdatingId(student.id);
+              // 1. Delete the student Firestore document
+              await deleteDoc(doc(db, 'students', student.id));
+              // 2. Record UID in deleted_students so auth-store blocks re-login
+              await setDoc(doc(db, 'deleted_students', student.id), {
+                uid: student.id,
+                email: student.email,
+                name: student.name,
+                deletedAt: new Date().toISOString(),
+              });
+              // 3. Remove from local state
+              setStudents(prev => prev.filter(s => s.id !== student.id));
+              Alert.alert(
+                '✅ Deleted',
+                `${student.name} has been permanently removed.\n\nNote: Their Firebase Auth account still exists but they cannot log in.`
+              );
+            } catch (error) {
+              console.error('Error deleting student:', error);
+              Alert.alert('Error', 'Failed to delete student. Please try again.');
+            } finally {
+              setUpdatingId(null);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleViewDetails = (student: Student) => {
@@ -300,6 +340,12 @@ export default function AdminManageStudents() {
                     <Text style={styles.statValue}>{student.profileCompleted ? '✓' : '✗'}</Text>
                     <Text style={styles.statLabel}>Profile</Text>
                   </View>
+                  {student.prnNumber ? (
+                    <View style={styles.statItem}>
+                      <Text style={styles.statValue} numberOfLines={1}>{student.prnNumber}</Text>
+                      <Text style={styles.statLabel}>PRN</Text>
+                    </View>
+                  ) : null}
                 </View>
 
                 <View style={styles.studentActions}>
@@ -321,6 +367,14 @@ export default function AdminManageStudents() {
                     <Text style={styles.toggleButtonText}>
                       {isUpdating ? 'Updating...' : isActive ? 'Deactivate' : 'Activate'}
                     </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.deleteStudentBtn, isUpdating && styles.buttonDisabled]}
+                    onPress={() => handleDeleteStudent(student)}
+                    disabled={isUpdating}
+                  >
+                    <Trash2 size={14} color="#EF4444" />
+                    <Text style={styles.deleteStudentBtnText}>Delete</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -492,9 +546,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   activateButton: { backgroundColor: '#10B981' },
-  deactivateButton: { backgroundColor: '#EF4444' },
+  deactivateButton: { backgroundColor: '#F59E0B' },
   buttonDisabled: { opacity: 0.5 },
   toggleButtonText: { fontSize: 12, fontWeight: '600', color: '#FFFFFF' },
+  deleteStudentBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingVertical: 9, paddingHorizontal: 12,
+    borderRadius: 8, backgroundColor: '#FEF2F2',
+    borderWidth: 1, borderColor: '#FECACA',
+  },
+  deleteStudentBtnText: { fontSize: 12, fontWeight: '600', color: '#EF4444' },
 
   emptyState: { alignItems: 'center', paddingVertical: 48 },
   emptyStateTitle: { fontSize: 18, fontWeight: 'bold', color: '#374151', marginTop: 16, marginBottom: 8 },
