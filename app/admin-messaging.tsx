@@ -1,167 +1,213 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  TextInput,
-  KeyboardAvoidingView,
-  Platform,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  TextInput, KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Send, ArrowLeft, Search } from 'lucide-react-native';
+import { Send, ArrowLeft, Search, MessageSquare } from 'lucide-react-native';
 import { useAuth } from '@/hooks/auth-store';
 import { useMessaging } from '@/hooks/messaging-store';
 
-// Safely convert a Firestore Timestamp, JS Date, epoch number or ISO string → JS Date
 const toJsDate = (value: any): Date => {
   if (!value) return new Date();
-  // Firestore Timestamp object has a toDate() method
   if (typeof value?.toDate === 'function') return value.toDate();
-  // Already a JS Date
   if (value instanceof Date) return value;
-  // Epoch seconds (Firestore { seconds, nanoseconds })
   if (typeof value?.seconds === 'number') return new Date(value.seconds * 1000);
-  // Number or parseable string
   return new Date(value);
 };
 
-const formatTime = (rawTimestamp: any): string => {
-  const date = toJsDate(rawTimestamp);
-  const now = new Date();
-  const diff = now.getTime() - date.getTime();
-
+const formatTime = (raw: any): string => {
+  const d = toJsDate(raw);
+  const diff = Date.now() - d.getTime();
+  if (isNaN(diff)) return '';
   if (diff < 60000) return 'now';
   if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
   if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-
-  return date.toLocaleDateString();
+  return d.toLocaleDateString();
 };
 
-function StudentChatView({ conversation, adminName, onBack }: { conversation: any; adminName: string; onBack: () => void }) {
-  const { sendMessageAsAdmin, markMessagesAsRead } = useMessaging();
+// ── Admin Chat View ────────────────────────────────────────────────────────
+function AdminChatView({
+  conversationId,
+  studentName,
+  onBack,
+}: {
+  conversationId: string;
+  studentName: string;
+  onBack: () => void;
+}) {
   const { admin } = useAuth();
-
-  if (!conversation || !conversation.messages) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={onBack}>
-            <ArrowLeft size={24} color="#374151" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Loading...</Text>
-        </View>
-        <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-          <Text>No conversation available</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
+  const { conversations, sendMessageAsAdmin, markMessagesAsRead } = useMessaging();
   const [messageText, setMessageText] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const scrollRef = useRef<ScrollView>(null);
 
-  const handleSendMessage = () => {
-    if (messageText.trim() && admin) {
-      sendMessageAsAdmin(conversation.id, admin.id, admin.name, messageText);
-      setMessageText('');
+  // Always read from live store
+  const conversation = conversations.find(c => c.id === conversationId);
+  const messages = conversation?.messages || [];
+
+  useEffect(() => {
+    if (conversationId) markMessagesAsRead(conversationId);
+  }, [conversationId, messages.length]);
+
+  useEffect(() => {
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+  }, [messages.length]);
+
+  const handleSend = async () => {
+    const text = messageText.trim();
+    if (!text || !admin) return;
+    setMessageText('');
+    setIsSending(true);
+    try {
+      await sendMessageAsAdmin(conversationId, admin.id, admin.name || 'Admin', text);
+    } finally {
+      setIsSending(false);
     }
   };
 
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={styles.chatContainer}
+      style={{ flex: 1, backgroundColor: '#F9FAFB' }}
     >
-      {/* Chat Header */}
+      {/* Header */}
       <View style={styles.chatHeader}>
-        <TouchableOpacity onPress={onBack} style={styles.backButton}>
-          <ArrowLeft size={24} color="#1F2937" />
+        <TouchableOpacity onPress={onBack} style={styles.backBtn}>
+          <ArrowLeft size={22} color="#1F2937" />
         </TouchableOpacity>
-        <View>
-          <Text style={styles.chatHeaderTitle}>{conversation.studentName}</Text>
-          <Text style={styles.chatHeaderSubtitle}>Student Query</Text>
+        <View style={styles.studentAvatarWrap}>
+          <Text style={styles.studentAvatarText}>👤</Text>
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.chatHeaderName}>{studentName}</Text>
+          <Text style={styles.chatHeaderSub}>Student</Text>
         </View>
       </View>
 
       {/* Messages */}
-      <ScrollView style={styles.messagesContainer}>
-        {conversation.messages.map((message: any) => (
-          <View
-            key={message.id}
-            style={[
-              styles.messageItem,
-              message.senderRole === 'admin' ? styles.adminMessage : styles.studentMessage,
-            ]}
-          >
-            <View
-              style={[
-                styles.messageBubble,
-                message.senderRole === 'admin'
-                  ? styles.adminBubble
-                  : styles.studentBubble,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.messageText,
-                  message.senderRole === 'admin'
-                    ? styles.adminMessageText
-                    : styles.studentMessageText,
-                ]}
-              >
-                {message.text}
-              </Text>
-              <Text
-                style={[
-                  styles.messageTime,
-                  message.senderRole === 'admin'
-                    ? styles.adminMessageTime
-                    : styles.studentMessageTime,
-                ]}
-              >
-                {formatTime(message.timestamp)}
-              </Text>
-            </View>
+      <ScrollView
+        ref={scrollRef}
+        style={styles.messagesContainer}
+        contentContainerStyle={{ paddingVertical: 12 }}
+        onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}
+      >
+        {messages.length === 0 ? (
+          <View style={styles.emptyMessages}>
+            <MessageSquare size={40} color="#D1D5DB" />
+            <Text style={styles.emptyMsgText}>No messages yet</Text>
+            <Text style={styles.emptyMsgSub}>Send a message to start the conversation</Text>
           </View>
-        ))}
+        ) : (
+          messages.map((msg: any) => {
+            const isAdmin = msg.senderRole === 'admin';
+            return (
+              <View key={msg.id} style={[styles.msgRow, isAdmin ? styles.myRow : styles.theirRow]}>
+                <View style={[styles.bubble, isAdmin ? styles.adminBubble : styles.studentBubble]}>
+                  <Text style={[styles.bubbleText, isAdmin ? styles.adminBubbleText : styles.studentBubbleText]}>
+                    {msg.text}
+                  </Text>
+                  <Text style={[styles.bubbleTime, isAdmin ? styles.adminBubbleTime : styles.studentBubbleTime]}>
+                    {formatTime(msg.timestamp)}
+                  </Text>
+                </View>
+              </View>
+            );
+          })
+        )}
       </ScrollView>
 
-      {/* Input Area */}
-      <View style={styles.inputContainer}>
-        <View style={styles.inputWrapper}>
-          <TextInput
-            style={styles.input}
-            placeholder="Type your response..."
-            placeholderTextColor="#9CA3AF"
-            value={messageText}
-            onChangeText={setMessageText}
-            multiline
-          />
-        </View>
+      {/* Input */}
+      <View style={styles.inputBar}>
+        <TextInput
+          style={styles.textInput}
+          placeholder="Type your reply..."
+          placeholderTextColor="#9CA3AF"
+          value={messageText}
+          onChangeText={setMessageText}
+          multiline
+          maxHeight={100}
+        />
         <TouchableOpacity
-          style={styles.sendButton}
-          onPress={handleSendMessage}
-          disabled={!messageText.trim()}
+          style={[styles.sendBtn, (!messageText.trim() || isSending) && styles.sendBtnDisabled]}
+          onPress={handleSend}
+          disabled={!messageText.trim() || isSending}
         >
-          <Send size={20} color={messageText.trim() ? '#E2231A' : '#D1D5DB'} />
+          {isSending
+            ? <ActivityIndicator size="small" color="#FFFFFF" />
+            : <Send size={18} color="#FFFFFF" />
+          }
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
   );
 }
 
-function StudentListView({ students, onSelectStudent }: { students: any[]; onSelectStudent: (student: any) => void }) {
+// ── Main Admin Messaging Screen ────────────────────────────────────────────
+export default function AdminMessagingScreen() {
+  const { admin } = useAuth();
+  const { conversations, getAdminConversations } = useMessaging();
+  const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
+  const [selectedStudentName, setSelectedStudentName] = useState('');
   const [searchText, setSearchText] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
 
-  const filteredStudents = students.filter((student: any) =>
-    student.name.toLowerCase().includes(searchText.toLowerCase())
+  useEffect(() => {
+    if (!admin?.id) { setIsLoading(false); return; }
+    getAdminConversations(admin.id).finally?.(() => setIsLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [admin?.id]);
+
+  // Mark loading done once conversations load
+  useEffect(() => {
+    if (conversations.length > 0) setIsLoading(false);
+  }, [conversations.length]);
+
+  // Timeout fallback
+  useEffect(() => {
+    const t = setTimeout(() => setIsLoading(false), 5000);
+    return () => clearTimeout(t);
+  }, []);
+
+  if (!admin) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.centered}>
+          <Text style={styles.emptyTitle}>Admin Access Required</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Show chat view if a conversation is selected
+  if (selectedConvId) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <AdminChatView
+          conversationId={selectedConvId}
+          studentName={selectedStudentName}
+          onBack={() => { setSelectedConvId(null); setSelectedStudentName(''); }}
+        />
+      </SafeAreaView>
+    );
+  }
+
+  const filtered = conversations.filter(c =>
+    !searchText ||
+    (c.studentName || '').toLowerCase().includes(searchText.toLowerCase())
   );
 
   return (
-    <>
-      {/* Search Bar */}
-      <View style={styles.searchContainer}>
-        <Search size={20} color="#9CA3AF" style={styles.searchIcon} />
+    <SafeAreaView style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Student Queries</Text>
+        <Text style={styles.headerSub}>{conversations.length} conversations</Text>
+      </View>
+
+      {/* Search */}
+      <View style={styles.searchBar}>
+        <Search size={16} color="#9CA3AF" />
         <TextInput
           style={styles.searchInput}
           placeholder="Search students..."
@@ -171,304 +217,165 @@ function StudentListView({ students, onSelectStudent }: { students: any[]; onSel
         />
       </View>
 
-      {/* Student List */}
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {filteredStudents.length > 0 ? (
-          filteredStudents.map((student: any) => (
-            <TouchableOpacity
-              key={student.id}
-              style={styles.studentItem}
-              onPress={() => onSelectStudent(student)}
-            >
-              <View style={styles.studentAvatar}>
-                <Text style={styles.avatarText}>👤</Text>
-              </View>
-
-              <View style={styles.studentContent}>
-                <Text style={styles.studentName}>{student.name}</Text>
-                <Text style={styles.studentId}>ID: {student.id}</Text>
-              </View>
-
-              {student.unreadCount > 0 && (
-                <View style={styles.unreadBadge}>
-                  <Text style={styles.unreadCount}>{student.unreadCount}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          ))
-        ) : (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>No students found</Text>
-            <Text style={styles.emptySubtitle}>Try adjusting your search</Text>
-          </View>
-        )}
-      </ScrollView>
-    </>
-  );
-}
-
-export default function AdminMessagingScreen() {
-  const { admin } = useAuth();
-  const { conversations, getAdminConversations, getStudentSpecificConversation } = useMessaging();
-  const [selectedStudent, setSelectedStudent] = useState<any>(null);
-
-  // Set up admin conversations listener on mount
-  useEffect(() => {
-    if (admin?.id) {
-      getAdminConversations(admin.id);
-    }
-  }, [admin?.id, getAdminConversations]);
-
-  if (!admin) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.emptyState}>
-          <Text style={styles.emptyTitle}>Admin Access Required</Text>
-          <Text style={styles.emptySubtitle}>Please login as admin to access this section</Text>
+      {/* List */}
+      {isLoading ? (
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color="#6366F1" />
+          <Text style={styles.loadingText}>Loading conversations...</Text>
         </View>
-      </SafeAreaView>
-    );
-  }
-
-  const students = (conversations as any[])
-    .map((conv: any) => ({
-      id: conv.studentId,
-      name: conv.studentName,
-      unreadCount: (conv.messages || []).filter(
-        (msg: any) => msg.senderRole === 'student' && !msg.read
-      ).length,
-    })) || [];
-
-  if (selectedStudent) {
-    const conversation = getStudentSpecificConversation(admin?.id || '', selectedStudent?.id || '') || (conversations && conversations[0]) || null;
-    return (
-      <SafeAreaView style={styles.container}>
-        <StudentChatView
-          conversation={conversation}
-          adminName={admin.name}
-          onBack={() => setSelectedStudent(null)}
-        />
-      </SafeAreaView>
-    );
-  }
-
-  return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Student Queries</Text>
-      </View>
-      <StudentListView students={students} onSelectStudent={setSelectedStudent} />
+      ) : filtered.length === 0 ? (
+        <View style={styles.centered}>
+          <MessageSquare size={48} color="#D1D5DB" />
+          <Text style={styles.emptyTitle}>
+            {searchText ? 'No results found' : 'No student queries yet'}
+          </Text>
+          <Text style={styles.emptySubtitle}>
+            {searchText
+              ? 'Try a different search'
+              : 'When students send messages, they will appear here'}
+          </Text>
+        </View>
+      ) : (
+        <ScrollView showsVerticalScrollIndicator={false}>
+          {filtered.map(conv => {
+            const unread = (conv.messages || []).filter(
+              (m: any) => m.senderRole === 'student' && !m.read
+            ).length;
+            return (
+              <TouchableOpacity
+                key={conv.id}
+                style={styles.convItem}
+                onPress={() => {
+                  setSelectedConvId(conv.id);
+                  setSelectedStudentName(conv.studentName || 'Student');
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={styles.convAvatar}>
+                  <Text style={styles.convAvatarText}>👤</Text>
+                </View>
+                <View style={styles.convBody}>
+                  <View style={styles.convHeader}>
+                    <Text style={styles.convName}>{conv.studentName || 'Student'}</Text>
+                    <Text style={styles.convTime}>{formatTime(conv.lastMessageTime)}</Text>
+                  </View>
+                  <View style={styles.convFooter}>
+                    <Text style={styles.convLastMsg} numberOfLines={1}>
+                      {conv.lastMessage || 'No messages'}
+                    </Text>
+                    {unread > 0 && (
+                      <View style={styles.badge}>
+                        <Text style={styles.badgeText}>{unread}</Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F9FAFB',
-  },
+  container: { flex: 1, backgroundColor: '#F9FAFB' },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
+
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
+    paddingHorizontal: 16, paddingVertical: 14,
+    backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#F3F4F6',
   },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#111827',
+  headerTitle: { fontSize: 22, fontWeight: '800', color: '#111827' },
+  headerSub: { fontSize: 12, color: '#9CA3AF', marginTop: 2 },
+
+  searchBar: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    marginHorizontal: 16, marginVertical: 10,
+    backgroundColor: '#FFFFFF', borderRadius: 12,
+    paddingHorizontal: 12, paddingVertical: 10,
+    borderWidth: 1, borderColor: '#E5E7EB',
   },
-  // Search Section
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginHorizontal: 16,
-    marginVertical: 12,
-    paddingHorizontal: 12,
-    backgroundColor: '#F3F4F6',
-    borderRadius: 20,
-    height: 40,
-    gap: 8,
+  searchInput: { flex: 1, fontSize: 14, color: '#1F2937' },
+
+  loadingText: { marginTop: 10, color: '#9CA3AF', fontSize: 14 },
+  emptyTitle: { fontSize: 16, fontWeight: '700', color: '#374151', marginTop: 14, textAlign: 'center' },
+  emptySubtitle: { fontSize: 13, color: '#9CA3AF', textAlign: 'center', marginTop: 6, lineHeight: 20 },
+
+  convItem: {
+    flexDirection: 'row', alignItems: 'center',
+    padding: 14, backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1, borderBottomColor: '#F3F4F6',
   },
-  searchIcon: {
-    marginTop: 2,
+  convAvatar: {
+    width: 48, height: 48, borderRadius: 24,
+    backgroundColor: '#EEF2FF', alignItems: 'center',
+    justifyContent: 'center', marginRight: 12,
   },
-  searchInput: {
-    flex: 1,
-    fontSize: 14,
-    color: '#1F2937',
+  convAvatarText: { fontSize: 24 },
+  convBody: { flex: 1 },
+  convHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
+  convName: { fontSize: 15, fontWeight: '700', color: '#111827' },
+  convTime: { fontSize: 12, color: '#9CA3AF' },
+  convFooter: { flexDirection: 'row', alignItems: 'center' },
+  convLastMsg: { fontSize: 13, color: '#6B7280', flex: 1, marginRight: 6 },
+  badge: {
+    backgroundColor: '#6366F1', borderRadius: 10,
+    minWidth: 20, height: 20, justifyContent: 'center',
+    alignItems: 'center', paddingHorizontal: 5,
   },
-  // Student List
-  studentItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-  },
-  studentAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#E5E7EB',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  avatarText: {
-    fontSize: 24,
-  },
-  studentContent: {
-    flex: 1,
-  },
-  studentName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1F2937',
-  },
-  studentId: {
-    fontSize: 12,
-    color: '#9CA3AF',
-    marginTop: 2,
-  },
-  unreadBadge: {
-    backgroundColor: '#E2231A',
-    borderRadius: 10,
-    minWidth: 24,
-    height: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 6,
-  },
-  unreadCount: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  // Chat View
-  chatContainer: {
-    flex: 1,
-    backgroundColor: '#F9FAFB',
-  },
+  badgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+
+  // Chat view
   chatHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-    gap: 12,
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 14, paddingVertical: 12,
+    backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#F3F4F6',
   },
-  backButton: {
-    padding: 4,
+  backBtn: { padding: 4 },
+  studentAvatarWrap: {
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center',
   },
-  chatHeaderTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1F2937',
+  studentAvatarText: { fontSize: 20 },
+  chatHeaderName: { fontSize: 15, fontWeight: '700', color: '#1F2937' },
+  chatHeaderSub: { fontSize: 11, color: '#9CA3AF', marginTop: 1 },
+
+  messagesContainer: { flex: 1, paddingHorizontal: 14 },
+  emptyMessages: { alignItems: 'center', paddingTop: 80 },
+  emptyMsgText: { fontSize: 16, fontWeight: '700', color: '#9CA3AF', marginTop: 14 },
+  emptyMsgSub: { fontSize: 13, color: '#C4C4C4', marginTop: 6, textAlign: 'center' },
+
+  msgRow: { marginVertical: 3, flexDirection: 'row' },
+  myRow: { justifyContent: 'flex-end' },
+  theirRow: { justifyContent: 'flex-start' },
+  bubble: {
+    maxWidth: '78%', paddingHorizontal: 14,
+    paddingTop: 8, paddingBottom: 6, borderRadius: 16,
   },
-  chatHeaderSubtitle: {
-    fontSize: 12,
-    color: '#9CA3AF',
-    marginTop: 2,
+  adminBubble: { backgroundColor: '#6366F1', borderBottomRightRadius: 4 },
+  studentBubble: { backgroundColor: '#FFFFFF', borderBottomLeftRadius: 4, borderWidth: 1, borderColor: '#E5E7EB' },
+  bubbleText: { fontSize: 15, lineHeight: 20 },
+  adminBubbleText: { color: '#FFFFFF' },
+  studentBubbleText: { color: '#1F2937' },
+  bubbleTime: { fontSize: 10, marginTop: 3 },
+  adminBubbleTime: { color: '#C7D2FE', textAlign: 'right' },
+  studentBubbleTime: { color: '#9CA3AF' },
+
+  inputBar: {
+    flexDirection: 'row', alignItems: 'flex-end', gap: 8,
+    paddingHorizontal: 14, paddingVertical: 10,
+    backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: '#F3F4F6',
   },
-  messagesContainer: {
-    flex: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+  textInput: {
+    flex: 1, backgroundColor: '#F3F4F6', borderRadius: 20,
+    paddingHorizontal: 16, paddingVertical: 10,
+    fontSize: 14, color: '#1F2937', maxHeight: 100,
   },
-  messageItem: {
-    marginVertical: 6,
-    flexDirection: 'row',
+  sendBtn: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: '#6366F1', alignItems: 'center', justifyContent: 'center',
   },
-  studentMessage: {
-    justifyContent: 'flex-start',
-  },
-  adminMessage: {
-    justifyContent: 'flex-end',
-  },
-  messageBubble: {
-    maxWidth: '80%',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
-  },
-  studentBubble: {
-    backgroundColor: '#E5E7EB',
-  },
-  adminBubble: {
-    backgroundColor: '#E2231A',
-  },
-  messageText: {
-    fontSize: 14,
-  },
-  studentMessageText: {
-    color: '#1F2937',
-  },
-  adminMessageText: {
-    color: '#FFFFFF',
-  },
-  messageTime: {
-    fontSize: 11,
-    marginTop: 4,
-  },
-  studentMessageTime: {
-    color: '#9CA3AF',
-  },
-  adminMessageTime: {
-    color: '#FECACA',
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
-    borderTopColor: '#F3F4F6',
-    gap: 8,
-  },
-  inputWrapper: {
-    flex: 1,
-    maxHeight: 100,
-  },
-  input: {
-    backgroundColor: '#F3F4F6',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: '#1F2937',
-    flex: 1,
-  },
-  sendButton: {
-    padding: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  emptyState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 32,
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#111827',
-    marginBottom: 8,
-  },
-  emptySubtitle: {
-    fontSize: 14,
-    color: '#6B7280',
-    textAlign: 'center',
-    lineHeight: 20,
-  },
+  sendBtnDisabled: { backgroundColor: '#D1D5DB' },
 });
