@@ -13,7 +13,9 @@ import {
   TrendingUp,
   Eye,
   Trash2,
-  MessageSquare
+  MessageSquare,
+  UserPlus,
+  List
 } from 'lucide-react-native';
 import { useCallback } from 'react';
 import { useAuth } from '@/hooks/auth-store';
@@ -135,7 +137,7 @@ export default function AdminDashboard() {
           <View>
             <Text style={styles.welcomeText}>Welcome back,</Text>
             <Text style={styles.adminName}>{admin?.name}</Text>
-            <Text style={styles.universityName}>Sanjay Ghodawat University</Text>
+            <Text style={styles.universityName}>Ignite</Text>
           </View>
           <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
             <LogOut size={20} color="#DC2626" />
@@ -187,10 +189,16 @@ export default function AdminDashboard() {
               color="#10B981"
             />
             <ActionButton
-              icon={Building2}
-              title="Manage Companies"
-              onPress={() => router.push('/admin-manage-companies' as any)}
+              icon={List}
+              title="Manage Jobs"
+              onPress={() => router.push('/admin-manage-jobs' as any)}
               color="#F59E0B"
+            />
+            <ActionButton
+              icon={UserPlus}
+              title="Add Student"
+              onPress={() => router.push('/admin-create-student' as any)}
+              color="#10B981"
             />
             <ActionButton
               icon={FileText}

@@ -32,7 +32,7 @@ export default function HomeScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loginPrompt}>
-          <Text style={styles.loginTitle}>SGU Placement Portal</Text>
+          <Text style={styles.loginTitle}>Ignite Placement Portal</Text>
           <Text style={styles.loginSubtitle}>Please login to access opportunities</Text>
         </View>
       </SafeAreaView>
@@ -43,11 +43,7 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Image 
-          source={{ uri: 'https://www.sanjayghodawatuniversity.ac.in/assets/images/logo.png' }}
-          style={styles.logo}
-          resizeMode="contain"
-        />
+        <Text style={styles.headerBrand}>?? Ignite</Text>
         <TouchableOpacity 
           style={styles.notificationButton}
           onPress={() => router.push('/notifications' as any)}
@@ -66,7 +62,7 @@ export default function HomeScreen() {
         <View style={styles.welcomeSection}>
           <Text style={styles.welcomeText}>Welcome back,</Text>
           <Text style={styles.studentName}>{student.name}</Text>
-          <Text style={styles.universityName}>Sanjay Ghodawat University</Text>
+          <Text style={styles.universityName}>Ignite</Text>
         </View>
 
         {/* Stats Cards */}
@@ -138,9 +134,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#F3F4F6',
   },
-  logo: {
-    width: 32,
-    height: 32,
+  headerBrand: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#6366F1',
+    letterSpacing: 0.5,
   },
   notificationButton: {
     position: 'relative',

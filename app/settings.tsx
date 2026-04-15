@@ -150,7 +150,7 @@ export default function SettingsScreen() {
   const handleHelp = () => {
     Alert.alert(
       'Help & Support',
-      'For assistance, contact:\n\n📧 support@sgu.edu.in\n📞 +91 98765 43210\n\nPlacement Cell\nSanjay Ghodawat University\nKolhapur, Maharashtra',
+      'For assistance, contact:\n\n📧 support@ignite.edu.in\n📞 +91 98765 43210\n\nPlacement Cell\nIgnite\nPlacement Portal',
       [{ text: 'OK' }]
     );
   };

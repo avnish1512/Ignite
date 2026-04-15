@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Placement Drive App",
-    "slug": "placement-drive-app",
+    "name": "Ignite",
+    "slug": "ignite-placement",
     "version": "1.0.0",
     "orientation": "portrait",
     "scheme": "myapp",
@@ -13,10 +13,10 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.rork.placementdriveapp"
+      "bundleIdentifier": "com.sgu.ignite"
     },
     "android": {
-      "package": "com.rork.placementdriveapp"
+      "package": "com.sgu.ignite"
     },
     "plugins": [
       [

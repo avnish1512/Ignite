@@ -40,7 +40,7 @@ export default function AdminLoginScreen() {
               <Shield size={48} color="#DC2626" />
             </View>
             <Text style={styles.title}>Admin Portal</Text>
-            <Text style={styles.subtitle}>Sanjay Ghodawat University</Text>
+            <Text style={styles.subtitle}>Ignite</Text>
             <Text style={styles.description}>Placement Management System</Text>
           </View>
 

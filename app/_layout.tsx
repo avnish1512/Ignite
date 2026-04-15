@@ -75,6 +75,8 @@ function RootLayoutNav() {
       <Stack.Screen name="admin-messaging" options={{ title: "Messaging" }} />
       <Stack.Screen name="admin-manage-companies" options={{ title: "Manage Companies" }} />
       <Stack.Screen name="admin-manage-students" options={{ title: "Manage Students" }} />
+      <Stack.Screen name="admin-manage-jobs" options={{ headerShown: false }} />
+      <Stack.Screen name="admin-create-student" options={{ headerShown: false }} />
       <Stack.Screen name="job/[id]" options={{ headerShown: false }} />
       <Stack.Screen name="applications" options={{ title: "My Applications" }} />
       <Stack.Screen name="profile" options={{ title: "Profile" }} />

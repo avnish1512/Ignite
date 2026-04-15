@@ -56,6 +56,11 @@ export interface Student {
   profilePhoto?: string;
   profilePhotoPath?: string;
   profileCompleted?: boolean;
+  prnNumber?: string;        // PRN / Roll number
+  enrollmentNo?: string;     // Enrollment / registration number
+  isActive?: boolean;
+  createdAt?: string;
+  createdBy?: string;
 }
 
 export interface Company {

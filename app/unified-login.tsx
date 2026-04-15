@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, KeyboardAvoidingView, Platform, Dimensions, Image, ScrollView, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, KeyboardAvoidingView, Platform, Dimensions, ScrollView, StatusBar } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, router } from 'expo-router';
 import { Eye, EyeOff } from 'lucide-react-native';
@@ -70,17 +70,15 @@ export default function UnifiedLoginScreen() {
           bounces={false}
         >
           <View style={styles.logoContainer}>
-            <Image
-              source={{ uri: 'https://www.sanjayghodawatuniversity.ac.in/assets/images/logo.png' }}
-              style={styles.logo}
-              resizeMode="contain"
-            />
-            <Text style={styles.logoText}>Sanjay{'\n'}Ghodawat{'\n'}University</Text>
+            <View style={styles.logoIconBox}>
+              <Text style={styles.logoIcon}>🚀</Text>
+            </View>
+            <Text style={styles.logoText}>Ignite</Text>
           </View>
 
           <View style={styles.headerContainer}>
-            <Text style={styles.title}>Welcome to SGU</Text>
-            <Text style={styles.subtitle}>Placement Management System</Text>
+            <Text style={styles.title}>Welcome to Ignite</Text>
+            <Text style={styles.subtitle}>Placement Portal</Text>
           </View>
 
           <View style={styles.form}>
@@ -156,20 +154,29 @@ const styles = StyleSheet.create({
   logoContainer: {
     alignItems: 'center',
     marginBottom: 32,
-    flexDirection: 'column',
   },
-  logo: {
-    width: isTablet ? 80 : 64,
-    height: isTablet ? 80 : 64,
+  logoIconBox: {
+    width: 72,
+    height: 72,
+    borderRadius: 20,
+    backgroundColor: '#6366F1',
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 12,
+    shadowColor: '#6366F1',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  logoIcon: {
+    fontSize: 34,
   },
   logoText: {
-    fontSize: isTablet ? 13 : 11,
-    fontWeight: '700',
+    fontSize: isTablet ? 26 : 22,
+    fontWeight: '800',
     color: '#1F2937',
-    textAlign: 'center',
-    letterSpacing: 0.3,
-    lineHeight: 16,
+    letterSpacing: 1,
   },
   headerContainer: {
     alignItems: 'center',
