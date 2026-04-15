@@ -1,7 +1,6 @@
 import createContextHook from '@nkzw/create-context-hook';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Job, Application, Company } from '@/types/job';
-import { mockJobs } from '@/constants/jobs';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from '@/config/firebase';
 import { 
@@ -34,22 +33,13 @@ export const [JobsProvider, useJobs] = createContextHook(() => {
       const jobsQuery = query(jobsCollection, orderBy('postedDate', 'desc'));
       const jobsSnapshot = await getDocs(jobsQuery);
       
-      if (!jobsSnapshot.empty) {
-        const firestoreJobs = jobsSnapshot.docs.map(doc => ({
-          ...doc.data(),
-          id: doc.id
-        })) as Job[];
-        console.log('Loaded jobs from Firestore:', firestoreJobs.length);
-        setJobs(firestoreJobs);
-      } else {
-        console.log('No jobs in Firestore, initializing with mock data');
-        // Initialize Firestore with mock jobs
-        const batch = mockJobs.map(job => 
-          setDoc(doc(db, 'jobs', job.id), job)
-        );
-        await Promise.all(batch);
-        setJobs(mockJobs);
-      }
+      // Always use Firestore data — even if empty (do NOT seed mock jobs)
+      const firestoreJobs = jobsSnapshot.docs.map(d => ({
+        ...d.data(),
+        id: d.id
+      })) as Job[];
+      console.log('Loaded jobs from Firestore:', firestoreJobs.length);
+      setJobs(firestoreJobs);
 
       // Load applications from Firestore
       const applicationsCollection = collection(db, 'applications');
@@ -57,9 +47,9 @@ export const [JobsProvider, useJobs] = createContextHook(() => {
       const appSnapshot = await getDocs(applicationsQuery);
       
       if (!appSnapshot.empty) {
-        const firestoreApplications = appSnapshot.docs.map(doc => ({
-          ...doc.data(),
-          id: doc.id
+        const firestoreApplications = appSnapshot.docs.map(d => ({
+          ...d.data(),
+          id: d.id
         })) as Application[];
         console.log('Loaded applications from Firestore:', firestoreApplications.length);
         setApplications(firestoreApplications);
@@ -69,8 +59,8 @@ export const [JobsProvider, useJobs] = createContextHook(() => {
       }
     } catch (error) {
       console.log('Error loading data from Firestore:', error);
-      // Fallback to mock data if Firestore fails
-      setJobs(mockJobs);
+      // Do NOT fall back to mock data — show empty state instead
+      setJobs([]);
       setApplications([]);
     } finally {
       setIsLoading(false);
@@ -312,10 +302,17 @@ export const [JobsProvider, useJobs] = createContextHook(() => {
       await deleteDoc(docRef);
       console.log('Job deleted successfully from Firestore');
       
+      // Immediately remove from local state so UI updates without waiting for snapshot
+      setJobs(prev => prev.filter(j => j.id !== jobId));
+      
       return { success: true };
-    } catch (error) {
+    } catch (error: any) {
       console.log('Error deleting job from Firestore:', error);
-      return { success: false, error: 'Failed to delete job from database' };
+      let msg = 'Failed to delete job from database';
+      if (error.code === 'permission-denied') {
+        msg = 'Permission denied. Make sure Firestore rules allow admin to delete jobs.';
+      }
+      return { success: false, error: msg };
     }
   }, []);
 
