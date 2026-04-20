@@ -5,35 +5,35 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, router } from 'expo-router';
-import { ArrowLeft, Mail, Lock, User, Eye, EyeOff, UserPlus, CheckCircle } from 'lucide-react-native';
-import { db } from '@/config/firebase';
-import { doc, setDoc } from 'firebase/firestore';
-
-// ── Secondary Firebase app for creating students ──────────────────────────
-// Using a secondary app prevents createUserWithEmailAndPassword from
-// switching the ADMIN's auth session to the new student.
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
-
-const SECONDARY_APP_NAME = 'student-creator';
-const firebaseConfig = {
-  apiKey: "AIzaSyAC0TYsSETT0RN36ItoyRdujhpZm_HikDA",
-  authDomain: "ignite-4d73e.firebaseapp.com",
-  projectId: "ignite-4d73e",
-  storageBucket: "ignite-4d73e.firebasestorage.app",
-  messagingSenderId: "61424015105",
-  appId: "1:61424015105:web:f132b36df294522d3b6d00",
-};
-
-function getSecondaryAuth() {
-  const existingApp = getApps().find(a => a.name === SECONDARY_APP_NAME);
-  const secondaryApp = existingApp ?? initializeApp(firebaseConfig, SECONDARY_APP_NAME);
-  return getAuth(secondaryApp);
-}
-// ─────────────────────────────────────────────────────────────────────────
+import { ArrowLeft, Mail, Lock, User, Eye, EyeOff, UserPlus, CheckCircle, ShieldCheck } from 'lucide-react-native';
+import { supabase, silentAuth } from '@/config/supabase';
 
 const { width: screenWidth } = Dimensions.get('window');
 const isTablet = screenWidth >= 768;
+
+const InputField = ({ label, value, onChangeText, placeholder, icon: Icon, secureTextEntry, rightIcon, onRightIconPress, editable = true }: any) => (
+  <View style={styles.inputGroup}>
+    <Text style={styles.label}>{label}</Text>
+    <View style={styles.inputContainer}>
+      {Icon && <Icon size={18} color="#9CA3AF" />}
+      <TextInput
+        style={styles.input}
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor="#9CA3AF"
+        secureTextEntry={secureTextEntry}
+        autoCapitalize="none"
+        editable={editable}
+      />
+      {rightIcon && (
+        <TouchableOpacity onPress={onRightIconPress} style={styles.rightIcon}>
+          {rightIcon}
+        </TouchableOpacity>
+      )}
+    </View>
+  </View>
+);
 
 export default function AdminCreateStudent() {
   const [name, setName] = useState('');
@@ -43,310 +43,224 @@ export default function AdminCreateStudent() {
   const [isLoading, setIsLoading] = useState(false);
   const [created, setCreated] = useState<{ name: string; email: string; password: string } | null>(null);
 
-  const validate = () => {
-    if (!name.trim()) { Alert.alert('Error', 'Please enter the student\'s full name'); return false; }
-    if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      Alert.alert('Error', 'Please enter a valid email address'); return false;
-    }
-    if (password.length < 6) { Alert.alert('Error', 'Password must be at least 6 characters'); return false; }
-    return true;
-  };
-
   const handleCreate = async () => {
-    if (!validate()) return;
+    if (!name.trim() || !email.trim() || password.length < 6) {
+      Alert.alert('Error', 'Please fill all fields and use at least 6 characters for password.');
+      return;
+    }
     setIsLoading(true);
 
     try {
       const trimmedEmail = email.trim().toLowerCase();
       const trimmedName = name.trim();
 
-      // ✅ Use SECONDARY auth instance — admin session is NOT affected at all
-      const secondaryAuth = getSecondaryAuth();
-      const credential = await createUserWithEmailAndPassword(secondaryAuth, trimmedEmail, password);
-      const newUid = credential.user.uid;
-
-      // Set display name on the secondary auth user
-      await updateProfile(credential.user, { displayName: trimmedName });
-
-      // Sign the secondary auth instance out (clean up)
-      await secondaryAuth.signOut();
-
-      // Write student Firestore document
-      // Admin is still signed in (primary auth) so admin write rules apply
-      await setDoc(doc(db, 'students', newUid), {
-        id: newUid,
-        name: trimmedName,
+      let authResult = await supabase.auth.admin.createUser({
         email: trimmedEmail,
-        phone: '',
-        course: '',
-        year: '',
-        cgpa: 0,
-        prnNumber: '',
-        enrollmentNo: '',
-        skills: [],
-        resume: '',
-        address: '',
-        profileCompleted: false,   // Forces profile-setup on first login
-        isActive: true,
-        createdAt: new Date().toISOString(),
-        createdBy: 'admin',
+        password: password,
+        user_metadata: { name: trimmedName },
+        email_confirm: true
       });
 
-      console.log('✅ Student created successfully:', trimmedEmail, 'uid:', newUid);
+      if (authResult.error?.status === 403) {
+        authResult = await silentAuth.signUp(trimmedEmail, password, trimmedName);
+      }
+
+      if (authResult.error) throw authResult.error;
+      const newUid = authResult.data?.user?.id;
+
+      const { error: insertError } = await supabase
+        .from('students')
+        .insert([{
+          id: newUid,
+          name: trimmedName,
+          email: trimmedEmail,
+          profile_completed: false,
+          is_active: true,
+          created_at: new Date().toISOString(),
+        }]);
+
+      if (insertError) throw insertError;
       setCreated({ name: trimmedName, email: trimmedEmail, password });
     } catch (error: any) {
-      console.error('Error creating student:', error.code, error.message);
-      let message = 'Failed to create student account.';
-      if (error.code === 'auth/email-already-in-use') {
-        message = 'This email is already registered.';
-      } else if (error.code === 'auth/invalid-email') {
-        message = 'Invalid email format.';
-      } else if (error.code === 'auth/weak-password') {
-        message = 'Password is too weak (min 6 characters).';
-      } else if (error.code === 'permission-denied') {
-        message = 'Permission denied. Check Firestore rules allow admin to write students.';
-      }
-      Alert.alert('Error', message);
+      Alert.alert('Error', error.message || 'Failed to create account');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleCreateAnother = () => {
-    setCreated(null);
-    setName('');
-    setEmail('');
-    setPassword('');
-  };
-
-  // ── Success State ─────────────────────────────────────────
   if (created) {
     return (
       <SafeAreaView style={styles.container}>
         <Stack.Screen options={{ headerShown: false }} />
-        <View style={styles.successContainer}>
-          <View style={styles.successIconBox}>
-            <CheckCircle size={52} color="#10B981" />
+        <View style={styles.successContent}>
+          <View style={styles.successIcon}>
+            <CheckCircle size={48} color="#10B981" />
           </View>
-          <Text style={styles.successTitle}>Account Created!</Text>
-          <Text style={styles.successSubtitle}>
-            Share these credentials with the student.{'\n'}They will fill their profile on first login.
-          </Text>
-
-          <View style={styles.credentialsCard}>
-            <Text style={styles.credLabel}>Student Name</Text>
-            <Text style={styles.credValue}>{created.name}</Text>
+          <Text style={styles.successTitle}>Account Ready!</Text>
+          <Text style={styles.successSubtitle}>Give these credentials to the student for their first login.</Text>
+          
+          <View style={styles.credCard}>
+            <View style={styles.credRow}>
+              <Text style={styles.credLabel}>STUDENT NAME</Text>
+              <Text style={styles.credValue}>{created.name}</Text>
+            </View>
             <View style={styles.credDivider} />
-            <Text style={styles.credLabel}>Email (Login ID)</Text>
-            <Text style={styles.credValue}>{created.email}</Text>
+            <View style={styles.credRow}>
+              <Text style={styles.credLabel}>EMAIL / ID</Text>
+              <Text style={styles.credValue}>{created.email}</Text>
+            </View>
             <View style={styles.credDivider} />
-            <Text style={styles.credLabel}>Password</Text>
-            <Text style={styles.credValue}>{created.password}</Text>
+            <View style={styles.credRow}>
+              <Text style={styles.credLabel}>PASSWORD</Text>
+              <Text style={styles.credValue}>{created.password}</Text>
+            </View>
           </View>
 
-          <TouchableOpacity style={styles.createAnotherBtn} onPress={handleCreateAnother}>
-            <UserPlus size={18} color="#FFFFFF" />
-            <Text style={styles.createAnotherText}>Create Another Student</Text>
+          <TouchableOpacity style={styles.primaryButton} onPress={() => setCreated(null)}>
+            <Text style={styles.primaryButtonText}>Add Another student</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.backDashBtn} onPress={() => router.back()}>
-            <Text style={styles.backDashText}>← Back to Dashboard</Text>
+          
+          <TouchableOpacity style={styles.secondaryButton} onPress={() => router.back()}>
+            <Text style={styles.secondaryButtonText}>Back to Dashboard</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
   }
 
-  // ── Form State ────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.container}>
-      <Stack.Screen options={{ headerShown: false }} />
-
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <ArrowLeft size={22} color="#1F2937" />
-        </TouchableOpacity>
-        <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>Add Student</Text>
-          <Text style={styles.headerSub}>Create login credentials for a student</Text>
-        </View>
-      </View>
-
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={{ flex: 1 }}
-      >
-        <ScrollView contentContainerStyle={styles.formContent} showsVerticalScrollIndicator={false}>
-
-          {/* Info Banner */}
-          <View style={styles.infoBanner}>
-            <Text style={styles.infoText}>
-              📋 Create a student account. The student will use these credentials to log in and complete their profile on first login.
-            </Text>
-          </View>
-
-          {/* Full Name */}
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Student Full Name <Text style={styles.req}>*</Text></Text>
-            <View style={styles.inputRow}>
-              <User size={18} color="#9CA3AF" />
-              <TextInput
-                style={styles.input}
-                placeholder="e.g. Priya Sharma"
-                value={name}
-                onChangeText={setName}
-                autoCapitalize="words"
-                placeholderTextColor="#9CA3AF"
-                editable={!isLoading}
-              />
+      <Stack.Screen 
+        options={{
+          headerShown: true,
+          title: 'Add Student',
+          headerLeft: () => (
+            <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+              <ArrowLeft size={24} color="#374151" />
+            </TouchableOpacity>
+          ),
+          headerStyle: { backgroundColor: '#FFFFFF' },
+        }}
+      />
+      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        <View style={styles.content}>
+          <View style={styles.header}>
+            <View style={styles.headerIcon}>
+              <UserPlus size={24} color="#6366F1" />
             </View>
+            <Text style={styles.headerTitle}>Student Onboarding</Text>
+            <Text style={styles.headerSubtitle}>Create login credentials for a new student</Text>
           </View>
 
-          {/* Email */}
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Email Address (Login ID) <Text style={styles.req}>*</Text></Text>
-            <View style={styles.inputRow}>
-              <Mail size={18} color="#9CA3AF" />
-              <TextInput
-                style={styles.input}
-                placeholder="e.g. priya.sharma@college.com"
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                placeholderTextColor="#9CA3AF"
-                editable={!isLoading}
-              />
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <ShieldCheck size={20} color="#6366F1" />
+              <Text style={styles.sectionTitle}>Account Credentials</Text>
             </View>
+            
+            <InputField
+              label="Full Name *"
+              value={name}
+              onChangeText={setName}
+              placeholder="e.g. Rahul Sharma"
+              icon={User}
+              editable={!isLoading}
+            />
+            
+            <InputField
+              label="Email Address *"
+              value={email}
+              onChangeText={setEmail}
+              placeholder="e.g. rahul@college.com"
+              icon={Mail}
+              editable={!isLoading}
+            />
+            
+            <InputField
+              label="Password *"
+              value={password}
+              onChangeText={setPassword}
+              placeholder="Min. 6 characters"
+              icon={Lock}
+              secureTextEntry={!showPassword}
+              rightIcon={showPassword ? <EyeOff size={18} color="#9CA3AF" /> : <Eye size={18} color="#9CA3AF" />}
+              onRightIconPress={() => setShowPassword(!showPassword)}
+              editable={!isLoading}
+            />
           </View>
 
-          {/* Password */}
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Password <Text style={styles.req}>*</Text></Text>
-            <Text style={styles.fieldHint}>Min 6 characters. Share this with the student.</Text>
-            <View style={styles.inputRow}>
-              <Lock size={18} color="#9CA3AF" />
-              <TextInput
-                style={[styles.input, { flex: 1 }]}
-                placeholder="e.g. Student@2024"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPassword}
-                placeholderTextColor="#9CA3AF"
-                editable={!isLoading}
-              />
-              <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeBtn}>
-                {showPassword ? <EyeOff size={18} color="#9CA3AF" /> : <Eye size={18} color="#9CA3AF" />}
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Submit */}
-          <TouchableOpacity
-            style={[styles.submitBtn, isLoading && styles.submitBtnDisabled]}
+          <TouchableOpacity 
+            style={[styles.primaryButton, isLoading && styles.primaryButtonDisabled]}
             onPress={handleCreate}
             disabled={isLoading}
           >
             {isLoading ? (
-              <>
-                <ActivityIndicator size="small" color="#FFFFFF" />
-                <Text style={styles.submitBtnText}>Creating Account...</Text>
-              </>
+              <ActivityIndicator color="#FFFFFF" size="small" />
             ) : (
-              <>
-                <UserPlus size={18} color="#FFFFFF" />
-                <Text style={styles.submitBtnText}>Create Student Account</Text>
-              </>
+              <Text style={styles.primaryButtonText}>Create Account</Text>
             )}
           </TouchableOpacity>
-
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F9FAFB' },
-
+  backButton: { padding: 8, marginLeft: -8 },
+  scrollView: { flex: 1 },
+  content: { paddingHorizontal: 16, paddingBottom: 40 },
   header: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 14,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1, borderBottomColor: '#E5E7EB',
+    alignItems: 'center', paddingVertical: 32, backgroundColor: '#FFFFFF',
+    marginHorizontal: -16, marginTop: -16, borderBottomWidth: 1, borderBottomColor: '#E5E7EB', marginBottom: 24,
   },
-  backBtn: { padding: 6, marginRight: 10 },
-  headerCenter: { flex: 1 },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: '#1F2937' },
-  headerSub: { fontSize: 12, color: '#6B7280', marginTop: 1 },
-
-  formContent: { padding: 20, paddingBottom: 60 },
-
-  infoBanner: {
-    backgroundColor: '#EEF2FF', borderRadius: 12,
-    padding: 14, marginBottom: 24,
-    borderWidth: 1, borderColor: '#C7D2FE',
+  headerIcon: {
+    width: 48, height: 48, borderRadius: 24, backgroundColor: '#EEF2FF',
+    alignItems: 'center', justifyContent: 'center', marginBottom: 12,
   },
-  infoText: { fontSize: 13, color: '#4338CA', lineHeight: 20 },
-
-  fieldGroup: { marginBottom: 20 },
-  label: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 6 },
-  fieldHint: { fontSize: 12, color: '#9CA3AF', marginBottom: 6 },
-  req: { color: '#EF4444' },
-
-  inputRow: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#FFFFFF', borderWidth: 1,
-    borderColor: '#E5E7EB', borderRadius: 12,
-    paddingHorizontal: 14, paddingVertical: 14, gap: 10,
+  headerTitle: { fontSize: 22, fontWeight: 'bold', color: '#111827', marginBottom: 4 },
+  headerSubtitle: { fontSize: 13, color: '#6B7280', textAlign: 'center' },
+  section: {
+    backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, marginBottom: 20,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 2,
   },
-  input: {
-    flex: 1, fontSize: 15, color: '#1F2937',
+  sectionHeader: {
+    flexDirection: 'row', alignItems: 'center', marginBottom: 20, paddingBottom: 8,
+    borderBottomWidth: 1, borderBottomColor: '#F3F4F6',
   },
-  eyeBtn: { padding: 4 },
-
-  submitBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 10, backgroundColor: '#6366F1', borderRadius: 14,
-    paddingVertical: 16, marginTop: 8,
-    shadowColor: '#6366F1', shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2, shadowRadius: 8, elevation: 4,
+  sectionTitle: { fontSize: 16, fontWeight: '600', color: '#111827', marginLeft: 8 },
+  inputGroup: { marginBottom: 16 },
+  label: { fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 8 },
+  inputContainer: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9FAFB',
+    borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 8, paddingHorizontal: 12, gap: 10,
   },
-  submitBtnDisabled: { backgroundColor: '#9CA3AF', shadowOpacity: 0, elevation: 0 },
-  submitBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
-
-  // Success screen
-  successContainer: {
-    flex: 1, alignItems: 'center', justifyContent: 'center',
-    padding: 32,
+  input: { flex: 1, paddingVertical: 12, fontSize: 14, color: '#111827' },
+  rightIcon: { padding: 4 },
+  primaryButton: {
+    backgroundColor: '#6366F1', paddingVertical: 16, borderRadius: 10, alignItems: 'center',
+    shadowColor: '#6366F1', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 3,
   },
-  successIconBox: {
-    width: 96, height: 96, borderRadius: 48,
-    backgroundColor: '#DCFCE7', alignItems: 'center', justifyContent: 'center',
-    marginBottom: 20,
+  primaryButtonDisabled: { backgroundColor: '#9CA3AF' },
+  primaryButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
+  
+  // Success Screen
+  successContent: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  successIcon: {
+    width: 80, height: 80, borderRadius: 40, backgroundColor: '#DCFCE7',
+    alignItems: 'center', justifyContent: 'center', marginBottom: 20,
   },
-  successTitle: { fontSize: 24, fontWeight: '800', color: '#1F2937', marginBottom: 8 },
-  successSubtitle: {
-    fontSize: 14, color: '#6B7280', textAlign: 'center', lineHeight: 22, marginBottom: 28,
+  successTitle: { fontSize: 24, fontWeight: 'bold', color: '#111827', marginBottom: 8 },
+  successSubtitle: { fontSize: 14, color: '#6B7280', textAlign: 'center', marginBottom: 32 },
+  credCard: {
+    width: '100%', backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20,
+    borderWidth: 1, borderColor: '#E5E7EB', marginBottom: 24,
   },
-  credentialsCard: {
-    width: '100%', backgroundColor: '#FFFFFF',
-    borderRadius: 16, padding: 24,
-    borderWidth: 1, borderColor: '#E5E7EB',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06, shadowRadius: 8, elevation: 3,
-    marginBottom: 28,
-  },
-  credLabel: { fontSize: 11, fontWeight: '600', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: 0.5 },
-  credValue: { fontSize: 15, fontWeight: '600', color: '#1F2937', marginTop: 4 },
-  credDivider: { height: 1, backgroundColor: '#F3F4F6', marginVertical: 14 },
-
-  createAnotherBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: '#6366F1', paddingHorizontal: 24, paddingVertical: 14,
-    borderRadius: 12, width: '100%', justifyContent: 'center', marginBottom: 12,
-  },
-  createAnotherText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
-  backDashBtn: { paddingVertical: 10 },
-  backDashText: { color: '#6366F1', fontWeight: '600', fontSize: 15 },
+  credRow: { paddingVertical: 4 },
+  credLabel: { fontSize: 10, fontWeight: '700', color: '#9CA3AF', marginBottom: 4 },
+  credValue: { fontSize: 15, fontWeight: '600', color: '#111827' },
+  credDivider: { height: 1, backgroundColor: '#F3F4F6', marginVertical: 12 },
+  secondaryButton: { marginTop: 16, padding: 8 },
+  secondaryButtonText: { color: '#6366F1', fontWeight: '600' },
 });

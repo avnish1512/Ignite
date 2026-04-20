@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Flame } from 'lucide-react-native';
 import { router } from 'expo-router';
 
 export default function SplashScreen() {
@@ -17,7 +18,7 @@ export default function SplashScreen() {
 
         {/* Ignite Logo */}
         <View style={styles.logoBox}>
-          <Text style={styles.logoEmoji}>🚀</Text>
+          <Flame size={56} color="#FFFFFF" fill="#FFFFFF" />
         </View>
 
         <Text style={styles.title}>Ignite</Text>
@@ -37,7 +38,7 @@ export default function SplashScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#0F0F11',
   },
   content: {
     flex: 1,
@@ -59,26 +60,23 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     elevation: 10,
   },
-  logoEmoji: {
-    fontSize: 56,
-  },
   title: {
     fontSize: 48,
     fontWeight: '900',
-    color: '#1F2937',
+    color: '#F9FAFB',
     marginBottom: 8,
     letterSpacing: 2,
   },
   subtitle: {
     fontSize: 18,
-    color: '#6366F1',
+    color: '#818CF8',
     fontWeight: '600',
     marginBottom: 6,
     textAlign: 'center',
   },
   tagline: {
     fontSize: 14,
-    color: '#9CA3AF',
+    color: '#6B7280',
     marginBottom: 60,
     textAlign: 'center',
   },

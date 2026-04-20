@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Alert, Share } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useLocalSearchParams, router } from 'expo-router';
 import { 
@@ -16,11 +16,15 @@ import {
 } from 'lucide-react-native';
 import { useJobs } from '@/hooks/jobs-store';
 import { useAuth } from '@/hooks/auth-store';
+import { useTheme } from '@/hooks/theme-store';
+import { formatSalary } from '@/hooks/salary-utils';
 
 export default function JobDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { getJobById, applyToJob } = useJobs();
   const { student } = useAuth();
+  const theme = useTheme();
+  const styles = React.useMemo(() => makeStyles(theme), [theme]);
   const [isApplying, setIsApplying] = useState(false);
   const [applicationStatus, setApplicationStatus] = useState<'Eligible' | 'Not Eligible' | 'Applied' | null>(null);
 
@@ -35,27 +39,15 @@ export default function JobDetailScreen() {
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>Job not found</Text>
           <TouchableOpacity 
-            style={styles.backButton}
+            style={styles.backButtonLarge}
             onPress={() => router.back()}
           >
-            <Text style={styles.backButtonText}>Go Back</Text>
+            <Text style={styles.backButtonLargeText}>Go Back</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
   }
-
-  const formatCTC = (min: number, max: number) => {
-    const formatAmount = (amount: number) => {
-      if (amount >= 10000000) return `${(amount / 10000000).toFixed(1)}Cr`;
-      if (amount >= 100000) return `${(amount / 100000).toFixed(1)}L`;
-      return `${(amount / 1000).toFixed(0)}K`;
-    };
-    
-    return min === max 
-      ? `INR ${formatAmount(min)}`
-      : `INR ${formatAmount(min)} - ${formatAmount(max)}`;
-  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -63,6 +55,17 @@ export default function JobDetailScreen() {
       case 'Applied': return '#3B82F6';
       case 'Not Eligible': return '#EF4444';
       default: return '#6B7280';
+    }
+  };
+
+  const handleShare = async () => {
+    try {
+      await Share.share({
+        title: `${job.title} at ${job.company}`,
+        message: `🚀 Check out this opportunity!\n\n📌 ${job.title} at ${job.company}\n📍 ${job.location}\n💰 ${formatSalary(job.ctc)}\n🏢 ${job.jobType}\n\nApply via Ignite Placement Portal!`,
+      });
+    } catch (error) {
+      console.log('Share error:', error);
     }
   };
 
@@ -133,18 +136,21 @@ export default function JobDetailScreen() {
         options={{ 
           headerShown: true,
           title: '',
+          headerStyle: { backgroundColor: theme.surface },
+          headerTintColor: theme.text,
+          headerShadowVisible: false,
           headerLeft: () => (
             <TouchableOpacity onPress={() => router.back()} style={styles.headerButton}>
-              <ArrowLeft size={24} color="#111827" />
+              <ArrowLeft size={24} color={theme.text} />
             </TouchableOpacity>
           ),
           headerRight: () => (
             <View style={styles.headerActions}>
-              <TouchableOpacity style={styles.headerButton}>
-                <Share2 size={20} color="#6B7280" />
+              <TouchableOpacity style={styles.headerButton} onPress={handleShare}>
+                <Share2 size={20} color={theme.textSecondary} />
               </TouchableOpacity>
               <TouchableOpacity style={styles.headerButton}>
-                <Bookmark size={20} color="#6B7280" />
+                <Bookmark size={20} color={theme.textSecondary} />
               </TouchableOpacity>
             </View>
           ),
@@ -168,7 +174,7 @@ export default function JobDetailScreen() {
               <Text style={styles.jobTitle}>{job.title}</Text>
               <Text style={styles.companyName}>{job.company}</Text>
               <View style={styles.locationRow}>
-                <MapPin size={16} color="#6B7280" />
+                <MapPin size={16} color={theme.textSecondary} />
                 <Text style={styles.locationText}>{job.location}</Text>
               </View>
             </View>
@@ -185,10 +191,10 @@ export default function JobDetailScreen() {
           <View style={styles.detailCard}>
             <DollarSign size={20} color="#10B981" />
             <Text style={styles.detailLabel}>CTC</Text>
-            <Text style={styles.detailValue}>{formatCTC(job.ctc.min, job.ctc.max)}</Text>
+            <Text style={styles.detailValue}>{formatSalary(job.ctc)}</Text>
           </View>
           <View style={styles.detailCard}>
-            <Building size={20} color="#6366F1" />
+            <Building size={20} color={theme.primary} />
             <Text style={styles.detailLabel}>Job Type</Text>
             <Text style={styles.detailValue}>{job.jobType}</Text>
           </View>
@@ -208,7 +214,7 @@ export default function JobDetailScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Skills Required</Text>
           <View style={styles.skillsContainer}>
-            {job.skills.map((skill, index) => (
+            {Array.isArray(job.skills) && job.skills.map((skill, index) => (
               <View key={index} style={styles.skillTag}>
                 <Text style={styles.skillText}>{skill}</Text>
               </View>
@@ -225,7 +231,7 @@ export default function JobDetailScreen() {
         {/* Requirements */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Requirements</Text>
-          {job.requirements.map((requirement, index) => (
+          {Array.isArray(job.requirements) && job.requirements.map((requirement, index) => (
             <View key={index} style={styles.requirementItem}>
               <CheckCircle size={16} color="#10B981" />
               <Text style={styles.requirementText}>{requirement}</Text>
@@ -296,243 +302,245 @@ export default function JobDetailScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F9FAFB',
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  errorText: {
-    fontSize: 18,
-    color: '#6B7280',
-    marginBottom: 16,
-  },
-  backButton: {
-    backgroundColor: '#6366F1',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-  backButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  headerButton: {
-    padding: 8,
-  },
-  headerActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  companyHeader: {
-    backgroundColor: '#FFFFFF',
-    padding: 16,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  companyInfo: {
-    flexDirection: 'row',
-    flex: 1,
-  },
-  logoContainer: {
-    marginRight: 16,
-  },
-  logo: {
-    width: 64,
-    height: 64,
-    borderRadius: 12,
-  },
-  logoPlaceholder: {
-    width: 64,
-    height: 64,
-    borderRadius: 12,
-    backgroundColor: '#6366F1',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  logoText: {
-    color: '#FFFFFF',
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
-  titleContainer: {
-    flex: 1,
-  },
-  jobTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#111827',
-    marginBottom: 4,
-  },
-  companyName: {
-    fontSize: 16,
-    color: '#6B7280',
-    marginBottom: 8,
-  },
-  locationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  locationText: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginLeft: 4,
-  },
-  statusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-  },
-  statusText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  keyDetails: {
-    flexDirection: 'row',
-    padding: 16,
-    gap: 12,
-  },
-  detailCard: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  detailLabel: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  detailValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#111827',
-    textAlign: 'center',
-  },
-  section: {
-    backgroundColor: '#FFFFFF',
-    marginTop: 8,
-    padding: 16,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#111827',
-    marginBottom: 16,
-  },
-  skillsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  skillTag: {
-    backgroundColor: '#EEF2FF',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-  },
-  skillText: {
-    fontSize: 12,
-    color: '#6366F1',
-    fontWeight: '500',
-  },
-  description: {
-    fontSize: 16,
-    color: '#374151',
-    lineHeight: 24,
-  },
-  requirementItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-  },
-  requirementText: {
-    fontSize: 14,
-    color: '#374151',
-    marginLeft: 12,
-    flex: 1,
-    lineHeight: 20,
-  },
-  companyDetails: {
-    gap: 16,
-  },
-  companyDetailItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  companyDetailLabel: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  companyDetailValue: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#111827',
-  },
-  deadlineSection: {
-    backgroundColor: '#FEF3C7',
-    margin: 16,
-    padding: 16,
-    borderRadius: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  deadlineInfo: {
-    marginLeft: 12,
-    flex: 1,
-  },
-  deadlineTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#92400E',
-    marginBottom: 4,
-  },
-  deadlineText: {
-    fontSize: 12,
-    color: '#A16207',
-  },
-  applySection: {
-    backgroundColor: '#FFFFFF',
-    padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#F3F4F6',
-  },
-  applyButton: {
-    backgroundColor: '#6366F1',
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  appliedButton: {
-    backgroundColor: '#10B981',
-  },
-  disabledButton: {
-    backgroundColor: '#9CA3AF',
-  },
-  applyButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  appliedButtonText: {
-    color: '#FFFFFF',
-  },
-  disabledButtonText: {
-    color: '#FFFFFF',
-  },
-});
+function makeStyles(theme: ReturnType<typeof useTheme>) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: theme.background,
+    },
+    errorContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 20,
+    },
+    errorText: {
+      fontSize: 18,
+      color: theme.textSecondary,
+      marginBottom: 16,
+    },
+    backButtonLarge: {
+      backgroundColor: theme.primary,
+      paddingHorizontal: 24,
+      paddingVertical: 12,
+      borderRadius: 8,
+    },
+    backButtonLargeText: {
+      color: '#FFFFFF',
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    headerButton: {
+      padding: 8,
+    },
+    headerActions: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    companyHeader: {
+      backgroundColor: theme.surface,
+      padding: 16,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+    },
+    companyInfo: {
+      flexDirection: 'row',
+      flex: 1,
+    },
+    logoContainer: {
+      marginRight: 16,
+    },
+    logo: {
+      width: 64,
+      height: 64,
+      borderRadius: 12,
+    },
+    logoPlaceholder: {
+      width: 64,
+      height: 64,
+      borderRadius: 12,
+      backgroundColor: theme.primary,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    logoText: {
+      color: '#FFFFFF',
+      fontSize: 24,
+      fontWeight: 'bold',
+    },
+    titleContainer: {
+      flex: 1,
+    },
+    jobTitle: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      color: theme.text,
+      marginBottom: 4,
+    },
+    companyName: {
+      fontSize: 16,
+      color: theme.textSecondary,
+      marginBottom: 8,
+    },
+    locationRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    locationText: {
+      fontSize: 14,
+      color: theme.textSecondary,
+      marginLeft: 4,
+    },
+    statusBadge: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 16,
+    },
+    statusText: {
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    keyDetails: {
+      flexDirection: 'row',
+      padding: 16,
+      gap: 12,
+    },
+    detailCard: {
+      flex: 1,
+      backgroundColor: theme.surface,
+      borderRadius: 12,
+      padding: 16,
+      alignItems: 'center',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.05,
+      shadowRadius: 2,
+      elevation: 1,
+    },
+    detailLabel: {
+      fontSize: 12,
+      color: theme.textSecondary,
+      marginTop: 8,
+      marginBottom: 4,
+    },
+    detailValue: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.text,
+      textAlign: 'center',
+    },
+    section: {
+      backgroundColor: theme.surface,
+      marginTop: 8,
+      padding: 16,
+    },
+    sectionTitle: {
+      fontSize: 18,
+      fontWeight: 'bold',
+      color: theme.text,
+      marginBottom: 16,
+    },
+    skillsContainer: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    skillTag: {
+      backgroundColor: theme.primaryLight,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 16,
+    },
+    skillText: {
+      fontSize: 12,
+      color: theme.primary,
+      fontWeight: '500',
+    },
+    description: {
+      fontSize: 16,
+      color: theme.textSecondary,
+      lineHeight: 24,
+    },
+    requirementItem: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      marginBottom: 12,
+    },
+    requirementText: {
+      fontSize: 14,
+      color: theme.textSecondary,
+      marginLeft: 12,
+      flex: 1,
+      lineHeight: 20,
+    },
+    companyDetails: {
+      gap: 16,
+    },
+    companyDetailItem: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    companyDetailLabel: {
+      fontSize: 14,
+      color: theme.textSecondary,
+    },
+    companyDetailValue: {
+      fontSize: 14,
+      fontWeight: '500',
+      color: theme.text,
+    },
+    deadlineSection: {
+      backgroundColor: theme.isDark ? '#422006' : '#FEF3C7',
+      margin: 16,
+      padding: 16,
+      borderRadius: 12,
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    deadlineInfo: {
+      marginLeft: 12,
+      flex: 1,
+    },
+    deadlineTitle: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.isDark ? '#FBBF24' : '#92400E',
+      marginBottom: 4,
+    },
+    deadlineText: {
+      fontSize: 12,
+      color: theme.isDark ? '#FCD34D' : '#A16207',
+    },
+    applySection: {
+      backgroundColor: theme.surface,
+      padding: 16,
+      borderTopWidth: 1,
+      borderTopColor: theme.border,
+    },
+    applyButton: {
+      backgroundColor: theme.primary,
+      paddingVertical: 16,
+      borderRadius: 12,
+      alignItems: 'center',
+    },
+    appliedButton: {
+      backgroundColor: '#10B981',
+    },
+    disabledButton: {
+      backgroundColor: '#9CA3AF',
+    },
+    applyButtonText: {
+      color: '#FFFFFF',
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    appliedButtonText: {
+      color: '#FFFFFF',
+    },
+    disabledButtonText: {
+      color: '#FFFFFF',
+    },
+  });
+}

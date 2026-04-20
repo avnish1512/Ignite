@@ -2,19 +2,7 @@ import createContextHook from '@nkzw/create-context-hook';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Job, Application, Company } from '@/types/job';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { db } from '@/config/firebase';
-import { 
-  collection, 
-  addDoc, 
-  getDocs, 
-  updateDoc, 
-  deleteDoc, 
-  doc, 
-  onSnapshot,
-  query,
-  orderBy,
-  setDoc
-} from 'firebase/firestore';
+import { supabase } from '@/config/supabase';
 
 const APPLICATIONS_STORAGE_KEY = 'placement_applications';
 
@@ -26,40 +14,69 @@ export const [JobsProvider, useJobs] = createContextHook(() => {
 
   const loadData = useCallback(async () => {
     try {
-      console.log('Loading jobs and applications from Firestore...');
+      console.log('Loading jobs and applications from Supabase...');
       
-      // Load jobs from Firestore
-      const jobsCollection = collection(db, 'jobs');
-      const jobsQuery = query(jobsCollection, orderBy('postedDate', 'desc'));
-      const jobsSnapshot = await getDocs(jobsQuery);
+      // Load jobs from Supabase
+      const { data: jobsData, error: jobsError } = await supabase
+        .from('jobs')
+        .select('*')
+        .order('posted_date', { ascending: false });
       
-      // Always use Firestore data — even if empty (do NOT seed mock jobs)
-      const firestoreJobs = jobsSnapshot.docs.map(d => ({
-        ...d.data(),
-        id: d.id
-      })) as Job[];
-      console.log('Loaded jobs from Firestore:', firestoreJobs.length);
-      setJobs(firestoreJobs);
+      if (jobsError) throw jobsError;
+      console.log('Loaded jobs from Supabase:', jobsData?.length || 0);
+      
+      // Convert snake_case to camelCase
+      const convertedJobs = (jobsData || []).map((job: any) => ({
+        id: job.id,
+        title: job.title,
+        company: job.company,
+        companyLogo: job.company_logo,
+        location: job.location,
+        ctc: job.ctc,
+        jobType: job.job_type,
+        industry: job.industry,
+        requirements: job.requirements,
+        description: job.description,
+        skills: job.skills,
+        eligibilityStatus: job.eligibility_status,
+        registrationDeadline: job.registration_deadline,
+        postedDate: job.posted_date,
+        isActive: job.is_active,
+        driveDate: job.drive_date,
+        eligibilityCriteria: job.eligibility_criteria,
+        contactEmail: job.contact_email,
+        contactPhone: job.contact_phone
+      }));
+      setJobs(convertedJobs);
 
-      // Load applications from Firestore
-      const applicationsCollection = collection(db, 'applications');
-      const applicationsQuery = query(applicationsCollection, orderBy('appliedDate', 'desc'));
-      const appSnapshot = await getDocs(applicationsQuery);
+      // Load applications from Supabase
+      const { data: applicationsData, error: appError } = await supabase
+        .from('applications')
+        .select('*')
+        .order('applied_date', { ascending: false });
       
-      if (!appSnapshot.empty) {
-        const firestoreApplications = appSnapshot.docs.map(d => ({
-          ...d.data(),
-          id: d.id
-        })) as Application[];
-        console.log('Loaded applications from Firestore:', firestoreApplications.length);
-        setApplications(firestoreApplications);
-      } else {
-        console.log('No applications in Firestore yet');
-        setApplications([]);
-      }
+      if (appError) throw appError;
+      console.log('Loaded applications from Supabase:', applicationsData?.length || 0);
+      
+      // Convert snake_case to camelCase
+      const convertedApplications = (applicationsData || []).map((app: any) => ({
+        id: app.id,
+        jobId: app.job_id,
+        studentId: app.student_id,
+        studentName: app.student_name,
+        studentEmail: app.student_email,
+        studentCGPA: app.student_cgpa,
+        studentCourse: app.student_course,
+        studentYear: app.student_year,
+        studentResume: app.student_resume,
+        status: app.status,
+        appliedDate: app.applied_date,
+        adminNotes: app.admin_notes,
+        lastUpdated: app.last_updated
+      }));
+      setApplications(convertedApplications);
     } catch (error) {
-      console.log('Error loading data from Firestore:', error);
-      // Do NOT fall back to mock data — show empty state instead
+      console.log('Error loading data from Supabase:', error);
       setJobs([]);
       setApplications([]);
     } finally {
@@ -70,53 +87,16 @@ export const [JobsProvider, useJobs] = createContextHook(() => {
   useEffect(() => {
     loadData();
     
-    // Set up real-time listener for jobs
-    const jobsCollection = collection(db, 'jobs');
-    const jobsQuery = query(jobsCollection, orderBy('postedDate', 'desc'));
+    // Set up real-time listener for jobs and applications
+    const channel = supabase
+      .channel('db-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs' }, () => loadData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'applications' }, () => loadData())
+      .subscribe();
     
-    const jobsUnsubscribe = onSnapshot(jobsQuery, (snapshot) => {
-      const updatedJobs = snapshot.docs.map(doc => ({
-        ...doc.data(),
-        id: doc.id
-      })) as Job[];
-      console.log('Real-time update: Jobs count:', updatedJobs.length);
-      setJobs(updatedJobs);
-    }, (error) => {
-      console.log('Error listening to jobs:', error);
-    });
-
-    // Set up real-time listener for applications
-    const applicationsCollection = collection(db, 'applications');
-    const applicationsQuery = query(applicationsCollection, orderBy('appliedDate', 'desc'));
-    
-    const applicationsUnsubscribe = onSnapshot(applicationsQuery, (snapshot) => {
-      const updatedApplications = snapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          jobId: data.jobId,
-          studentId: data.studentId,
-          status: data.status,
-          appliedDate: data.appliedDate,
-          lastUpdated: data.lastUpdated,
-          studentName: data.studentName,
-          studentEmail: data.studentEmail,
-          studentCGPA: data.studentCGPA,
-          studentCourse: data.studentCourse,
-          studentYear: data.studentYear,
-          adminNotes: data.adminNotes
-        } as Application;
-      });
-      console.log('Real-time update: Applications count:', updatedApplications.length);
-      setApplications(updatedApplications);
-    }, (error) => {
-      console.log('Error listening to applications:', error);
-    });
-    
-    // Cleanup both listeners
+    // Cleanup listener
     return () => {
-      jobsUnsubscribe();
-      applicationsUnsubscribe();
+      supabase.removeChannel(channel);
     };
   }, [loadData]);
 
@@ -133,7 +113,6 @@ export const [JobsProvider, useJobs] = createContextHook(() => {
     }
   ) => {
     try {
-      // Validate inputs
       if (!jobId || !studentId) {
         console.error('Invalid input: jobId or studentId is missing', { jobId, studentId });
         return { success: false, error: 'Missing job ID or student ID' };
@@ -145,46 +124,50 @@ export const [JobsProvider, useJobs] = createContextHook(() => {
         id: `${studentId}_${jobId}_${Date.now()}`,
         jobId,
         studentId,
-        studentName: studentData?.name,
-        studentEmail: studentData?.email,
-        studentCGPA: studentData?.cgpa,
-        studentCourse: studentData?.course,
-        studentYear: studentData?.year,
-        studentResume: studentData?.resume,
+        studentName: studentData?.name || '',
+        studentEmail: studentData?.email || '',
+        studentCGPA: studentData?.cgpa || null,
+        studentCourse: studentData?.course || '',
+        studentYear: studentData?.year || '',
+        studentResume: studentData?.resume || '',
         status: 'Applied',
         appliedDate: new Date().toISOString(),
         lastUpdated: new Date().toISOString()
       };
 
-      // Save to Firestore
-      const docRef = doc(db, 'applications', newApplication.id);
-      await setDoc(docRef, newApplication);
-      console.log('Application saved to Firestore:', newApplication.id);
-
-      // Update job eligibility status in Firestore (optional, won't fail if this fails)
-      try {
-        const jobDocRef = doc(db, 'jobs', jobId);
-        await updateDoc(jobDocRef, {
-          eligibilityStatus: 'Applied'
-        });
-        console.log('Job eligibility status updated');
-      } catch (jobUpdateError) {
-        console.warn('Warning: Could not update job status, but application was saved:', jobUpdateError);
-      }
+      // Save to Supabase - convert camelCase to snake_case
+      const { error } = await supabase
+        .from('applications')
+        .insert([{
+          id: newApplication.id,
+          job_id: newApplication.jobId,
+          student_id: newApplication.studentId,
+          student_name: newApplication.studentName,
+          student_email: newApplication.studentEmail,
+          student_cgpa: newApplication.studentCGPA,
+          student_course: newApplication.studentCourse,
+          student_year: newApplication.studentYear,
+          student_resume: newApplication.studentResume,
+          status: newApplication.status,
+          applied_date: newApplication.appliedDate,
+          last_updated: newApplication.lastUpdated,
+          created_at: new Date().toISOString()
+        }]);
+      
+      if (error) throw error;
+      console.log('Application saved to Supabase:', newApplication.id);
 
       return { success: true };
     } catch (error: any) {
-      console.error('Error applying to job:', error.code, error.message);
+      console.error('Error applying to job:', error.message);
       
       let errorMsg = 'Failed to apply to job';
-      if (error.code === 'permission-denied') {
-        errorMsg = 'Permission denied. Check your Firestore rules.';
-      } else if (error.code === 'not-found') {
+      if (error.message?.includes('permission')) {
+        errorMsg = 'Permission denied. Check your database permissions.';
+      } else if (error.message?.includes('not found')) {
         errorMsg = 'Job not found in database.';
       } else if (error.message?.includes('network')) {
         errorMsg = 'Network error. Check your internet connection.';
-      } else if (error.code === 'unavailable') {
-        errorMsg = 'Service temporarily unavailable. Please try again.';
       }
       
       return { success: false, error: errorMsg };
@@ -198,26 +181,28 @@ export const [JobsProvider, useJobs] = createContextHook(() => {
 
   const updateApplicationStatus = useCallback(async (applicationId: string, newStatus: Application['status'], adminNotes?: string) => {
     try {
-      console.log('Updating application status in Firestore:', applicationId, newStatus);
+      console.log('Updating application status in Supabase:', applicationId, newStatus);
       
-      const docRef = doc(db, 'applications', applicationId);
+      const { error } = await supabase
+        .from('applications')
+        .update({
+          status: newStatus,
+          admin_notes: adminNotes || '',
+          last_updated: new Date().toISOString()
+        })
+        .eq('id', applicationId);
       
-      // Verify the document exists first
-      const docSnapshot = await updateDoc(docRef, {
-        status: newStatus,
-        adminNotes: adminNotes || '',
-        lastUpdated: new Date().toISOString()
-      });
+      if (error) throw error;
       console.log('Application status updated successfully');
       
       return { success: true };
     } catch (error: any) {
-      console.error('Error updating application status:', error.code, error.message);
+      console.error('Error updating application status:', error.message);
       
       let errorMsg = 'Failed to update application status';
-      if (error.code === 'permission-denied') {
-        errorMsg = 'Permission denied. Check your Firestore rules.';
-      } else if (error.code === 'not-found') {
+      if (error.message?.includes('permission')) {
+        errorMsg = 'Permission denied. Check your database permissions.';
+      } else if (error.message?.includes('not found')) {
         errorMsg = 'Application not found in database.';
       } else if (error.message?.includes('network')) {
         errorMsg = 'Network error. Check your internet connection.';
@@ -230,7 +215,6 @@ export const [JobsProvider, useJobs] = createContextHook(() => {
   const addJob = useCallback(async (jobData: Omit<Job, 'id'> & { id: string }) => {
     try {
       console.log('Adding new job:', jobData.title, 'at', jobData.company);
-      console.log('Full job data:', JSON.stringify(jobData, null, 2));
       
       const newJob: Job = {
         id: jobData.id,
@@ -254,23 +238,42 @@ export const [JobsProvider, useJobs] = createContextHook(() => {
         ...(jobData.contactPhone && { contactPhone: jobData.contactPhone })
       };
       
-      console.log('Saving job to Firestore...');
-      // Save to Firestore
-      const docRef = doc(db, 'jobs', jobData.id);
-      await setDoc(docRef, newJob);
-      console.log('✅ Job saved to Firestore successfully with ID:', jobData.id);
+      console.log('Saving job to Supabase...');
+      const { error } = await supabase
+        .from('jobs')
+        .insert([{
+          id: newJob.id,
+          title: newJob.title,
+          company: newJob.company,
+          company_logo: newJob.companyLogo,
+          location: newJob.location,
+          ctc: newJob.ctc,
+          job_type: newJob.jobType,
+          industry: newJob.industry,
+          requirements: newJob.requirements,
+          description: newJob.description,
+          skills: newJob.skills,
+          eligibility_status: newJob.eligibilityStatus,
+          registration_deadline: newJob.registrationDeadline,
+          posted_date: newJob.postedDate,
+          is_active: newJob.isActive,
+          drive_date: newJob.driveDate,
+          eligibility_criteria: newJob.eligibilityCriteria,
+          contact_email: newJob.contactEmail,
+          contact_phone: newJob.contactPhone,
+          created_at: new Date().toISOString()
+        }]);
+      
+      if (error) throw error;
+      console.log('✅ Job saved to Supabase successfully with ID:', jobData.id);
       
       return { success: true };
     } catch (error: any) {
-      console.error('❌ Error adding job to Firestore:', error);
-      console.error('❌ Error code:', error.code);
-      console.error('❌ Error message:', error.message);
-      console.error('❌ Full error:', JSON.stringify(error, null, 2));
+      console.error('❌ Error adding job to Supabase:', error);
       
       let errorMsg = 'Failed to add job to database';
-      if (error.code === 'permission-denied') {
-        errorMsg = '❌ Permission denied. Check Firebase Firestore rules. Only admin can post jobs. Make sure your Firestore rules allow admin writes to jobs collection.';
-        console.error('🔐 FIRESTORE SECURITY RULES ISSUE:', errorMsg);
+      if (error.message?.includes('permission')) {
+        errorMsg = '❌ Permission denied. Check your database permissions.';
       } else if (error.message?.includes('network')) {
         errorMsg = 'Network error. Check your internet connection.';
       }
@@ -281,36 +284,61 @@ export const [JobsProvider, useJobs] = createContextHook(() => {
 
   const updateJob = useCallback(async (jobId: string, updates: Partial<Job>) => {
     try {
-      console.log('Updating job in Firestore:', jobId);
+      console.log('Updating job in Supabase:', jobId);
       
-      const docRef = doc(db, 'jobs', jobId);
-      await updateDoc(docRef, updates);
-      console.log('Job updated successfully in Firestore');
+      // Convert camelCase to snake_case
+      const snakeCaseUpdates: any = {};
+      for (const [key, value] of Object.entries(updates)) {
+        if (key === 'jobType') snakeCaseUpdates.job_type = value;
+        else if (key === 'companyLogo') snakeCaseUpdates.company_logo = value;
+        else if (key === 'eligibilityStatus') snakeCaseUpdates.eligibility_status = value;
+        else if (key === 'registrationDeadline') snakeCaseUpdates.registration_deadline = value;
+        else if (key === 'postedDate') snakeCaseUpdates.posted_date = value;
+        else if (key === 'isActive') snakeCaseUpdates.is_active = value;
+        else if (key === 'driveDate') snakeCaseUpdates.drive_date = value;
+        else if (key === 'eligibilityCriteria') snakeCaseUpdates.eligibility_criteria = value;
+        else if (key === 'contactEmail') snakeCaseUpdates.contact_email = value;
+        else if (key === 'contactPhone') snakeCaseUpdates.contact_phone = value;
+        else snakeCaseUpdates[key] = value;
+      }
+      snakeCaseUpdates.updated_at = new Date().toISOString();
+      
+      const { error } = await supabase
+        .from('jobs')
+        .update(snakeCaseUpdates)
+        .eq('id', jobId);
+      
+      if (error) throw error;
+      console.log('Job updated successfully in Supabase');
       
       return { success: true };
     } catch (error) {
-      console.log('Error updating job in Firestore:', error);
+      console.log('Error updating job in Supabase:', error);
       return { success: false, error: 'Failed to update job in database' };
     }
   }, []);
 
   const deleteJob = useCallback(async (jobId: string) => {
     try {
-      console.log('Deleting job from Firestore:', jobId);
+      console.log('Deleting job from Supabase:', jobId);
       
-      const docRef = doc(db, 'jobs', jobId);
-      await deleteDoc(docRef);
-      console.log('Job deleted successfully from Firestore');
+      const { error } = await supabase
+        .from('jobs')
+        .delete()
+        .eq('id', jobId);
+      
+      if (error) throw error;
+      console.log('Job deleted successfully from Supabase');
       
       // Immediately remove from local state so UI updates without waiting for snapshot
       setJobs(prev => prev.filter(j => j.id !== jobId));
       
       return { success: true };
     } catch (error: any) {
-      console.log('Error deleting job from Firestore:', error);
+      console.log('Error deleting job from Supabase:', error);
       let msg = 'Failed to delete job from database';
-      if (error.code === 'permission-denied') {
-        msg = 'Permission denied. Make sure Firestore rules allow admin to delete jobs.';
+      if (error.message?.includes('permission')) {
+        msg = 'Permission denied. Make sure your database permissions allow admin to delete jobs.';
       }
       return { success: false, error: msg };
     }
@@ -319,27 +347,33 @@ export const [JobsProvider, useJobs] = createContextHook(() => {
   // Company Management Functions
   const loadCompanies = useCallback(async () => {
     try {
-      console.log('Loading companies from Firestore...');
+      console.log('Loading companies from Supabase...');
       
-      const companiesCollection = collection(db, 'companies');
-      const companiesQuery = query(companiesCollection, orderBy('addedDate', 'desc'));
-      const companiesSnapshot = await getDocs(companiesQuery);
+      const { data, error } = await supabase
+        .from('companies')
+        .select('*')
+        .order('added_date', { ascending: false });
       
-      if (!companiesSnapshot.empty) {
-        const firestoreCompanies = companiesSnapshot.docs.map(doc => ({
-          ...doc.data(),
-          id: doc.id
-        })) as Company[];
-        console.log('Loaded companies from Firestore:', firestoreCompanies.length);
-        setCompanies(firestoreCompanies);
-      } else {
-        console.log('No companies in Firestore yet');
-        setCompanies([]);
-      }
+      if (error) throw error;
+      console.log('Loaded companies from Supabase:', data?.length || 0);
+      
+      // Convert snake_case to camelCase
+      const convertedCompanies = (data || []).map((company: any) => ({
+        id: company.id,
+        name: company.name,
+        description: company.description,
+        website: company.website,
+        logo: company.logo,
+        industry: company.industry,
+        addedDate: company.added_date,
+        addedBy: company.added_by
+      }));
+      
+      setCompanies(convertedCompanies);
       
       return { success: true };
     } catch (error) {
-      console.log('Error loading companies from Firestore:', error);
+      console.log('Error loading companies from Supabase:', error);
       return { success: false, error: 'Failed to load companies' };
     }
   }, []);
@@ -355,17 +389,31 @@ export const [JobsProvider, useJobs] = createContextHook(() => {
         isActive: true
       };
       
-      console.log('Saving company to Firestore...');
-      const docRef = doc(db, 'companies', newCompany.id);
-      await setDoc(docRef, newCompany);
-      console.log('Company saved to Firestore successfully:', newCompany.id);
+      console.log('Saving company to Supabase...');
+      const { error } = await supabase
+        .from('companies')
+        .insert([{
+          id: newCompany.id,
+          name: newCompany.name,
+          description: newCompany.description,
+          website: newCompany.website,
+          logo: newCompany.logo,
+          industry: newCompany.industry,
+          added_date: newCompany.addedDate,
+          added_by: newCompany.addedBy,
+          is_active: newCompany.isActive,
+          created_at: new Date().toISOString()
+        }]);
+      
+      if (error) throw error;
+      console.log('Company saved to Supabase successfully:', newCompany.id);
       
       return { success: true, data: newCompany };
     } catch (error: any) {
-      console.error('Error adding company to Firestore:', error);
+      console.error('Error adding company to Supabase:', error);
       let errorMsg = 'Failed to add company to database';
-      if (error.code === 'permission-denied') {
-        errorMsg = '❌ Permission denied. Admin needs to update Firebase Firestore rules.\n\n📋 See FIREBASE_RULES.md for step-by-step instructions on updating rules in Firebase Console.';
+      if (error.message?.includes('permission')) {
+        errorMsg = '❌ Permission denied. Check your database permissions.';
       } else if (error.message?.includes('network')) {
         errorMsg = 'Network error. Check your internet connection.';
       }
@@ -375,62 +423,94 @@ export const [JobsProvider, useJobs] = createContextHook(() => {
 
   const updateCompany = useCallback(async (companyId: string, updates: Partial<Company>) => {
     try {
-      console.log('Updating company in Firestore:', companyId);
+      console.log('Updating company in Supabase:', companyId);
       
-      const docRef = doc(db, 'companies', companyId);
-      await updateDoc(docRef, updates);
-      console.log('Company updated successfully in Firestore');
+      // Convert camelCase to snake_case
+      const snakeCaseUpdates: any = {};
+      for (const [key, value] of Object.entries(updates)) {
+        if (key === 'addedDate') snakeCaseUpdates.added_date = value;
+        else if (key === 'addedBy') snakeCaseUpdates.added_by = value;
+        else if (key === 'isActive') snakeCaseUpdates.is_active = value;
+        else snakeCaseUpdates[key] = value;
+      }
+      snakeCaseUpdates.updated_at = new Date().toISOString();
+      
+      const { error } = await supabase
+        .from('companies')
+        .update(snakeCaseUpdates)
+        .eq('id', companyId);
+      
+      if (error) throw error;
+      console.log('Company updated successfully in Supabase');
       
       return { success: true };
     } catch (error) {
-      console.log('Error updating company in Firestore:', error);
+      console.log('Error updating company in Supabase:', error);
       return { success: false, error: 'Failed to update company in database' };
     }
   }, []);
 
   const deleteCompany = useCallback(async (companyId: string) => {
     try {
-      console.log('Deleting company from Firestore:', companyId);
+      console.log('Deleting company from Supabase:', companyId);
       
       // Also delete all jobs associated with this company
-      const jobsCollection = collection(db, 'jobs');
-      const jobsSnapshot = await getDocs(jobsCollection);
-      const associatedJobs = jobsSnapshot.docs.filter(jobDoc => 
-        (jobDoc.data() as any).company === companyId || (jobDoc.data() as any).companyId === companyId
-      );
+      const { data: associatedJobs, error: fetchError } = await supabase
+        .from('jobs')
+        .select('id')
+        .eq('company', companyId);
       
-      const deleteJobPromises = associatedJobs.map(jobDoc => deleteDoc(jobDoc.ref));
-      await Promise.all(deleteJobPromises);
+      if (fetchError) throw fetchError;
+      
+      if (associatedJobs && associatedJobs.length > 0) {
+        const jobIds = associatedJobs.map(j => j.id);
+        const { error: deleteError } = await supabase
+          .from('jobs')
+          .delete()
+          .in('id', jobIds);
+        
+        if (deleteError) throw deleteError;
+      }
       
       // Delete the company document itself
-      const docRef = doc(db, 'companies', companyId);
-      await deleteDoc(docRef);
-      console.log('Company deleted successfully from Firestore');
+      const { error } = await supabase
+        .from('companies')
+        .delete()
+        .eq('id', companyId);
+      
+      if (error) throw error;
+      console.log('Company deleted successfully from Supabase');
       
       return { success: true };
     } catch (error) {
-      console.log('Error deleting company from Firestore:', error);
+      console.log('Error deleting company from Supabase:', error);
       return { success: false, error: 'Failed to delete company from database' };
     }
   }, []);
 
   const clearAllData = useCallback(async () => {
     try {
-      console.log('Clearing all data from Firestore...');
+      console.log('Clearing all data from Supabase...');
       
-      // Clear applications from Firestore
-      const applicationsSnapshot = await getDocs(collection(db, 'applications'));
-      const appDeletePromises = applicationsSnapshot.docs.map(doc => deleteDoc(doc.ref));
-      await Promise.all(appDeletePromises);
+      // Clear applications
+      const { error: appError } = await supabase
+        .from('applications')
+        .delete()
+        .neq('id', '');
       
-      // Clear jobs from Firestore
-      const jobsSnapshot = await getDocs(collection(db, 'jobs'));
-      const jobDeletePromises = jobsSnapshot.docs.map(doc => deleteDoc(doc.ref));
-      await Promise.all(jobDeletePromises);
+      if (appError) throw appError;
+      
+      // Clear jobs
+      const { error: jobError } = await supabase
+        .from('jobs')
+        .delete()
+        .neq('id', '');
+      
+      if (jobError) throw jobError;
       
       setJobs([]);
       setApplications([]);
-      console.log('All data cleared from Firestore');
+      console.log('All data cleared from Supabase');
       return { success: true };
     } catch (error) {
       console.log('Error clearing data:', error);

@@ -1,14 +1,15 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Stack } from 'expo-router';
-import { Mail, Phone, MapPin, GraduationCap, Calendar, Edit3, Save, X, AlertCircle, Upload, Download, Trash2, FileText } from 'lucide-react-native';
+import { Stack, useRouter } from 'expo-router';
+import { Mail, Phone, MapPin, GraduationCap, Calendar, Edit3, Save, X, AlertCircle, Upload, Download, Trash2, FileText, Hash, LogOut } from 'lucide-react-native';
 import { useAuth } from '@/hooks/auth-store';
 import { ValidationRules, formatPhoneNumber } from '@/hooks/validation-utils';
 import { useResumeUpload } from '@/hooks/resume-upload';
 
 export default function ProfileScreen() {
-  const { student, updateStudent } = useAuth();
+  const { student, updateStudent, logout } = useAuth();
+  const router = useRouter();
   const { uploading, uploadProgress, uploadResume, deleteResume } = useResumeUpload();
   const [isEditing, setIsEditing] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -21,7 +22,8 @@ export default function ProfileScreen() {
     year: '',
     cgpa: 0,
     skills: [],
-    address: ''
+    address: '',
+    prnNumber: ''
   });
   const [resumeError, setResumeError] = useState<string | null>(null);
 
@@ -240,6 +242,26 @@ export default function ProfileScreen() {
 
           <View style={styles.detailItem}>
             <View style={styles.detailIcon}>
+              <Hash size={20} color="#6B7280" />
+            </View>
+            <View style={styles.detailContent}>
+              <Text style={styles.detailLabel}>PRN</Text>
+              {isEditing ? (
+                <TextInput
+                  style={styles.detailInput}
+                  value={editedProfile.prnNumber}
+                  onChangeText={(text) => setEditedProfile(prev => ({ ...prev, prnNumber: text }))}
+                  placeholder="Permanent Registration Number"
+                  autoCapitalize="characters"
+                />
+              ) : (
+                <Text style={styles.detailValue}>{student.prnNumber || 'Not provided'}</Text>
+              )}
+            </View>
+          </View>
+
+          <View style={styles.detailItem}>
+            <View style={styles.detailIcon}>
               <Phone size={20} color="#6B7280" />
             </View>
             <View style={styles.detailContent}>
@@ -421,6 +443,20 @@ export default function ProfileScreen() {
           <Text style={styles.resumeHint}>
             Max file size: 5MB • Format: PDF only
           </Text>
+          
+          {/* Logout Button */}
+          <View style={{ padding: 20, marginBottom: 40 }}>
+            <TouchableOpacity 
+              style={styles.signOutButton}
+              onPress={async () => {
+                await logout();
+                router.replace('/unified-login' as any);
+              }}
+            >
+              <LogOut size={20} color="#EF4444" />
+              <Text style={styles.signOutText}>Sign Out</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -455,46 +491,6 @@ const styles = StyleSheet.create({
   photoContainer: {
     position: 'relative',
     marginBottom: 16,
-  },
-  photoActionOverlay: {
-    position: 'absolute',
-    bottom: 16,
-    right: 0,
-    flexDirection: 'row',
-    gap: 6,
-  },
-  photoOverlayButton: {
-    backgroundColor: '#6366F1',
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
-  },
-  cancelPhotoButton: {
-    backgroundColor: '#EF4444',
-  },
-  deletePhotoButton: {
-    backgroundColor: '#EF4444',
-  },
-  photoEditButtons: {
-    position: 'absolute',
-    bottom: 16,
-    right: 0,
-    flexDirection: 'row',
-    gap: 6,
-  },
-  photoEditSmallButton: {
-    backgroundColor: '#6366F1',
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
   },
   profileName: {
     fontSize: 24,
@@ -746,11 +742,6 @@ const styles = StyleSheet.create({
     borderColor: '#6366F1',
     marginBottom: 12,
   },
-  uploadButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#6366F1',
-  },
   uploadButtonTextDisabled: {
     fontSize: 16,
     fontWeight: '600',
@@ -779,11 +770,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#6366F1',
   },
-  changeResumeText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#6366F1',
-  },
   changeResumeTextDisabled: {
     fontSize: 14,
     fontWeight: '600',
@@ -799,5 +785,21 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
     textAlign: 'center',
     marginTop: 8,
+  },
+  signOutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    borderRadius: 12,
+    backgroundColor: '#FFF1F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    gap: 12,
+  },
+  signOutText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#EF4444',
   },
 });

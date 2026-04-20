@@ -54,7 +54,7 @@ function RootLayoutNav() {
         }
       }
     }
-  }, [isAuthenticated, isLoading, isAdmin, student?.profileCompleted]);
+  }, [isAuthenticated, isLoading, isAdmin, student, student?.profileCompleted, router]);
 
   if (isLoading) {
     return <CustomSplashScreen />;
@@ -68,7 +68,7 @@ function RootLayoutNav() {
       <Stack.Screen name="login" options={{ headerShown: false }} />
       <Stack.Screen name="admin-login" options={{ headerShown: false }} />
       <Stack.Screen name="profile-setup" options={{ headerShown: false }} />
-      
+
       {/* App Screens */}
       <Stack.Screen name="(tab)" options={{ headerShown: false }} />
       <Stack.Screen name="admin-dashboard" options={{ headerShown: false }} />
@@ -82,6 +82,7 @@ function RootLayoutNav() {
       <Stack.Screen name="profile" options={{ title: "Profile" }} />
       <Stack.Screen name="notifications" options={{ title: "Notifications" }} />
       <Stack.Screen name="settings" options={{ title: "Settings" }} />
+      <Stack.Screen name="student-directory" options={{ headerShown: false }} />
     </Stack>
   );
 }

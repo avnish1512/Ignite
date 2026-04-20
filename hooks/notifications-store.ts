@@ -1,21 +1,7 @@
 import createContextHook from '@nkzw/create-context-hook';
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { db } from '@/config/firebase';
-import {
-  collection,
-  addDoc,
-  query,
-  where,
-  orderBy,
-  onSnapshot,
-  setDoc,
-  doc,
-  serverTimestamp,
-  getDocs,
-  updateDoc,
-  deleteDoc,
-  Unsubscribe
-} from 'firebase/firestore';
+import { supabase } from '@/config/supabase';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 
 export interface Notification {
   id: string;
@@ -31,41 +17,73 @@ export interface Notification {
 export const [NotificationsProvider, useNotifications] = createContextHook(() => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
-  const unsubscriptionRefs = useRef<{ [key: string]: Unsubscribe }>({});
+  const channelRef = useRef<RealtimeChannel | null>(null);
 
   // Initialize notifications listener for a user
   const initializeNotifications = useCallback((userId: string) => {
     try {
-      const notificationsRef = collection(db, 'notifications');
-      const q = query(
-        notificationsRef,
-        where('userId', '==', userId),
-        orderBy('timestamp', 'desc')
-      );
-
       // Unsubscribe from previous listener if exists
-      if (unsubscriptionRefs.current[userId]) {
-        unsubscriptionRefs.current[userId]();
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
       }
 
-      const unsubscribe = onSnapshot(q, (querySnapshot) => {
-        const loadedNotifications = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as Notification[];
+      // Fetch initial notifications
+      const fetchNotifications = async () => {
+        try {
+          const { data, error } = await supabase
+            .from('notifications')
+            .select('*')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false });
 
-        setNotifications(loadedNotifications);
+          if (error) {
+            console.error('Error fetching notifications:', error);
+            return;
+          }
 
-        // Update unread count
-        const unread = loadedNotifications.filter(n => !n.read).length;
-        setUnreadCount(unread);
-      }, (error) => {
-        console.error('Error loading notifications:', error);
-      });
+          const loadedNotifications = (data || []).map((n: any) => ({
+            id: n.id,
+            userId: n.user_id,
+            type: n.type || 'announcement',
+            title: n.title,
+            message: n.message,
+            timestamp: n.created_at,
+            read: n.read || false,
+            data: n.data || {}
+          })) as Notification[];
 
-      // Store unsubscription
-      unsubscriptionRefs.current[userId] = unsubscribe;
-      return unsubscribe;
+          setNotifications(loadedNotifications);
+          setUnreadCount(loadedNotifications.filter(n => !n.read).length);
+        } catch (err) {
+          console.error('Error loading notifications:', err);
+        }
+      };
+
+      fetchNotifications();
+
+      // Set up real-time listener
+      const channel = supabase
+        .channel(`notifications:${userId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'notifications',
+            filter: `user_id=eq.${userId}`
+          },
+          async () => {
+            // Refetch on any change
+            await fetchNotifications();
+          }
+        )
+        .subscribe();
+
+      channelRef.current = channel;
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
     } catch (error) {
       console.error('Error setting up notifications listener:', error);
       return () => {};
@@ -81,16 +99,22 @@ export const [NotificationsProvider, useNotifications] = createContextHook(() =>
     data?: Record<string, any>
   ) => {
     try {
-      const notificationsRef = collection(db, 'notifications');
-      await addDoc(notificationsRef, {
-        userId,
-        type,
-        title,
-        message,
-        timestamp: serverTimestamp(),
-        read: false,
-        data: data || {}
-      });
+      const { error } = await supabase
+        .from('notifications')
+        .insert({
+          user_id: userId,
+          type,
+          title,
+          message,
+          read: false,
+          data: data || {},
+          created_at: new Date().toISOString()
+        });
+
+      if (error) {
+        console.error('Error creating notification:', error);
+        return { success: false, error };
+      }
       return { success: true };
     } catch (error) {
       console.error('Error creating notification:', error);
@@ -101,8 +125,20 @@ export const [NotificationsProvider, useNotifications] = createContextHook(() =>
   // Mark notification as read
   const markAsRead = useCallback(async (notificationId: string) => {
     try {
-      const notificationRef = doc(db, 'notifications', notificationId);
-      await updateDoc(notificationRef, { read: true });
+      const { error } = await supabase
+        .from('notifications')
+        .update({ read: true })
+        .eq('id', notificationId);
+
+      if (error) {
+        console.error('Error marking notification as read:', error);
+      }
+
+      // Update local state
+      setNotifications(prev =>
+        prev.map(n => n.id === notificationId ? { ...n, read: true } : n)
+      );
+      setUnreadCount(prev => Math.max(0, prev - 1));
     } catch (error) {
       console.error('Error marking notification as read:', error);
     }
@@ -111,19 +147,19 @@ export const [NotificationsProvider, useNotifications] = createContextHook(() =>
   // Mark all notifications as read
   const markAllAsRead = useCallback(async (userId: string) => {
     try {
-      const notificationsRef = collection(db, 'notifications');
-      const q = query(
-        notificationsRef,
-        where('userId', '==', userId),
-        where('read', '==', false)
-      );
+      const { error } = await supabase
+        .from('notifications')
+        .update({ read: true })
+        .eq('user_id', userId)
+        .eq('read', false);
 
-      const querySnapshot = await getDocs(q);
-      querySnapshot.docs.forEach(docSnap => {
-        updateDoc(doc(db, 'notifications', docSnap.id), { read: true }).catch(err =>
-          console.error('Error updating notification:', err)
-        );
-      });
+      if (error) {
+        console.error('Error marking all as read:', error);
+      }
+
+      // Update local state
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+      setUnreadCount(0);
     } catch (error) {
       console.error('Error marking all as read:', error);
     }
@@ -132,8 +168,17 @@ export const [NotificationsProvider, useNotifications] = createContextHook(() =>
   // Delete notification
   const deleteNotification = useCallback(async (notificationId: string) => {
     try {
-      const notificationRef = doc(db, 'notifications', notificationId);
-      await deleteDoc(notificationRef);
+      const { error } = await supabase
+        .from('notifications')
+        .delete()
+        .eq('id', notificationId);
+
+      if (error) {
+        console.error('Error deleting notification:', error);
+      }
+
+      // Update local state
+      setNotifications(prev => prev.filter(n => n.id !== notificationId));
     } catch (error) {
       console.error('Error deleting notification:', error);
     }
@@ -142,19 +187,18 @@ export const [NotificationsProvider, useNotifications] = createContextHook(() =>
   // Delete all read notifications
   const clearReadNotifications = useCallback(async (userId: string) => {
     try {
-      const notificationsRef = collection(db, 'notifications');
-      const q = query(
-        notificationsRef,
-        where('userId', '==', userId),
-        where('read', '==', true)
-      );
+      const { error } = await supabase
+        .from('notifications')
+        .delete()
+        .eq('user_id', userId)
+        .eq('read', true);
 
-      const querySnapshot = await getDocs(q);
-      querySnapshot.docs.forEach(docSnap => {
-        deleteDoc(doc(db, 'notifications', docSnap.id)).catch(err =>
-          console.error('Error deleting notification:', err)
-        );
-      });
+      if (error) {
+        console.error('Error clearing notifications:', error);
+      }
+
+      // Update local state — keep only unread
+      setNotifications(prev => prev.filter(n => !n.read));
     } catch (error) {
       console.error('Error clearing notifications:', error);
     }
@@ -170,18 +214,24 @@ export const [NotificationsProvider, useNotifications] = createContextHook(() =>
   ) => {
     try {
       // Get all student IDs and create notification for each
-      const studentsRef = collection(db, 'students');
-      const studentsSnapshot = await getDocs(studentsRef);
+      const { data: students, error } = await supabase
+        .from('students')
+        .select('id');
 
-      studentsSnapshot.docs.forEach(studentDoc => {
-        createNotification(
-          studentDoc.id,
+      if (error) {
+        console.error('Error fetching students for notification:', error);
+        return;
+      }
+
+      for (const student of (students || [])) {
+        await createNotification(
+          student.id,
           'job',
           'New Job Opportunity',
           `${companyName} has posted a new position: ${jobTitle}`,
           { jobId, companyName }
         );
-      });
+      }
     } catch (error) {
       console.error('Error triggering job notification:', error);
     }
@@ -226,6 +276,15 @@ export const [NotificationsProvider, useNotifications] = createContextHook(() =>
       { senderName }
     );
   }, [createNotification]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+      }
+    };
+  }, []);
 
   return {
     notifications,

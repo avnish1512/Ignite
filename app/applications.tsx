@@ -5,10 +5,15 @@ import { Stack } from 'expo-router';
 import { Calendar, MapPin, DollarSign, Clock, CheckCircle, XCircle, AlertCircle, RotateCw } from 'lucide-react-native';
 import { useAuth } from '@/hooks/auth-store';
 import { useJobs } from '@/hooks/jobs-store';
+import { useTheme } from '@/hooks/theme-store';
+import { formatSalary } from '@/hooks/salary-utils';
+import StatusBadge from '@/components/StatusBadge';
 
 export default function ApplicationsScreen() {
   const { student } = useAuth();
   const { getApplicationsForStudent, jobs } = useJobs();
+  const theme = useTheme();
+  const styles = React.useMemo(() => makeStyles(theme), [theme]);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const onRefresh = () => {
@@ -46,31 +51,16 @@ export default function ApplicationsScreen() {
     statuses: allApplications.map(a => ({ jobId: a.jobId, status: a.status }))
   });
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'Applied': return '#F59E0B';
-      case 'Under Review': return '#3B82F6';
-      case 'Shortlisted': return '#8B5CF6';
-      case 'Selected': return '#10B981';
-      case 'Rejected': return '#EF4444';
-      default: return '#6B7280';
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'Applied': return AlertCircle;
-      case 'Under Review': return Clock;
-      case 'Shortlisted': return CheckCircle;
-      case 'Selected': return CheckCircle;
-      case 'Rejected': return XCircle;
-      default: return Clock;
-    }
-  };
-
   return (
     <SafeAreaView style={styles.container}>
-      <Stack.Screen options={{ title: 'My Applications' }} />
+      <Stack.Screen 
+        options={{ 
+          title: 'My Applications',
+          headerStyle: { backgroundColor: theme.surface },
+          headerTintColor: theme.text,
+          headerShadowVisible: false,
+        }} 
+      />
       
       <ScrollView 
         showsVerticalScrollIndicator={false}
@@ -97,8 +87,6 @@ export default function ApplicationsScreen() {
                 const job = jobs.find(j => j.id === application.jobId);
                 if (!job) return null;
                 
-                const StatusIcon = getStatusIcon(application.status);
-                
                 return (
                   <View key={application.id} style={styles.applicationCard}>
                     <View style={styles.cardHeader}>
@@ -106,25 +94,20 @@ export default function ApplicationsScreen() {
                         <Text style={styles.companyName}>{job.company}</Text>
                         <Text style={styles.jobTitle}>{job.title}</Text>
                       </View>
-                      <View style={[styles.statusBadge, { backgroundColor: getStatusColor(application.status) + '20' }]}>
-                        <StatusIcon size={12} color={getStatusColor(application.status)} />
-                        <Text style={[styles.statusText, { color: getStatusColor(application.status) }]}>
-                          {application.status}
-                        </Text>
-                      </View>
+                      <StatusBadge status={application.status} />
                     </View>
                     
                     <View style={styles.jobDetails}>
                       <View style={styles.detailRow}>
-                        <MapPin size={14} color="#6B7280" />
+                        <MapPin size={14} color={theme.textMuted} />
                         <Text style={styles.detailText}>{job.location}</Text>
                       </View>
                       <View style={styles.detailRow}>
-                        <DollarSign size={14} color="#6B7280" />
-                        <Text style={styles.detailText}>₹{job.ctc.min}L - ₹{job.ctc.max}L</Text>
+                        <DollarSign size={14} color={theme.textMuted} />
+                        <Text style={styles.detailText}>{formatSalary(job.ctc)}</Text>
                       </View>
                       <View style={styles.detailRow}>
-                        <Clock size={14} color="#6B7280" />
+                        <Clock size={14} color={theme.textMuted} />
                         <Text style={styles.detailText}>
                           {application.lastUpdated 
                             ? `Selected ${new Date(application.lastUpdated).toLocaleDateString()}`
@@ -149,15 +132,13 @@ export default function ApplicationsScreen() {
         {jobApplications.length > 0 ? (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Clock size={20} color="#6B7280" />
+              <Clock size={20} color={theme.textMuted} />
               <Text style={styles.sectionTitle}>Job Applications</Text>
             </View>
             <View style={styles.applicationsList}>
               {jobApplications.map((application) => {
                 const job = jobs.find(j => j.id === application.jobId);
                 if (!job) return null;
-                
-                const StatusIcon = getStatusIcon(application.status);
                 
                 return (
                   <View key={application.id} style={[
@@ -169,31 +150,26 @@ export default function ApplicationsScreen() {
                         <Text style={styles.companyName}>{job.company}</Text>
                         <Text style={styles.jobTitle}>{job.title}</Text>
                       </View>
-                      <View style={[styles.statusBadge, { backgroundColor: getStatusColor(application.status) + '20' }]}>
-                        <StatusIcon size={12} color={getStatusColor(application.status)} />
-                        <Text style={[styles.statusText, { color: getStatusColor(application.status) }]}>
-                          {application.status}
-                        </Text>
-                      </View>
+                      <StatusBadge status={application.status} />
                     </View>
                     
                     <View style={styles.jobDetails}>
                       <View style={styles.detailRow}>
-                        <MapPin size={14} color="#6B7280" />
+                        <MapPin size={14} color={theme.textMuted} />
                         <Text style={styles.detailText}>{job.location}</Text>
                       </View>
                       <View style={styles.detailRow}>
-                        <DollarSign size={14} color="#6B7280" />
-                        <Text style={styles.detailText}>₹{job.ctc.min}L - ₹{job.ctc.max}L</Text>
+                        <DollarSign size={14} color={theme.textMuted} />
+                        <Text style={styles.detailText}>{formatSalary(job.ctc)}</Text>
                       </View>
                       <View style={styles.detailRow}>
-                        <Clock size={14} color="#6B7280" />
+                        <Clock size={14} color={theme.textMuted} />
                         <Text style={styles.detailText}>Applied {new Date(application.appliedDate).toLocaleDateString()}</Text>
                       </View>
                       {application.adminNotes && (
                         <View style={styles.detailRow}>
-                          <AlertCircle size={14} color="#EF4444" />
-                          <Text style={[styles.detailText, { color: '#EF4444', fontWeight: '500' }]}>
+                          <AlertCircle size={14} color={theme.danger} />
+                          <Text style={[styles.detailText, { color: theme.danger, fontWeight: '500' }]}>
                             {application.adminNotes}
                           </Text>
                         </View>
@@ -212,7 +188,7 @@ export default function ApplicationsScreen() {
           </View>
         ) : (
           <View style={styles.emptyState}>
-            <Calendar size={48} color="#9CA3AF" />
+            <Calendar size={48} color={theme.textMuted} />
             <Text style={styles.emptyTitle}>No Job Applications Yet</Text>
             <Text style={styles.emptySubtitle}>Start applying to job opportunities to see them here</Text>
           </View>
@@ -222,133 +198,125 @@ export default function ApplicationsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F9FAFB',
-  },
-  header: {
-    padding: 16,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#111827',
-    marginBottom: 4,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  emptyState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 32,
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#111827',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  emptySubtitle: {
-    fontSize: 14,
-    color: '#6B7280',
-    textAlign: 'center',
-  },
-  applicationsList: {
-    padding: 16,
-  },
-  section: {
-    marginBottom: 24,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 8,
-    backgroundColor: '#F3F4F6',
-    marginBottom: 8,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#111827',
-  },
-  applicationCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  rejectedCard: {
-    borderLeftWidth: 4,
-    borderLeftColor: '#EF4444',
-    opacity: 0.85,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-  },
-  companyInfo: {
-    flex: 1,
-  },
-  companyName: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#111827',
-    marginBottom: 4,
-  },
-  jobTitle: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    gap: 4,
-  },
-  statusText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  jobDetails: {
-    gap: 8,
-    marginBottom: 12,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  detailText: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  deadline: {
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#F3F4F6',
-  },
-  deadlineText: {
-    fontSize: 12,
-    color: '#EF4444',
-    fontWeight: '500',
-  },
-});
+function makeStyles(theme: ReturnType<typeof import('@/hooks/theme-store').useTheme>) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: theme.background,
+    },
+    header: {
+      padding: 16,
+      backgroundColor: theme.surface,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.border,
+    },
+    title: {
+      fontSize: 24,
+      fontWeight: 'bold',
+      color: theme.text,
+      marginBottom: 4,
+    },
+    subtitle: {
+      fontSize: 14,
+      color: theme.textSecondary,
+    },
+    emptyState: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 32,
+    },
+    emptyTitle: {
+      fontSize: 18,
+      fontWeight: '600',
+      color: theme.text,
+      marginTop: 16,
+      marginBottom: 8,
+    },
+    emptySubtitle: {
+      fontSize: 14,
+      color: theme.textSecondary,
+      textAlign: 'center',
+    },
+    applicationsList: {
+      padding: 16,
+    },
+    section: {
+      marginBottom: 24,
+    },
+    sectionHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      gap: 8,
+      backgroundColor: theme.surfaceAlt,
+      marginBottom: 8,
+    },
+    sectionTitle: {
+      fontSize: 16,
+      fontWeight: 'bold',
+      color: theme.text,
+    },
+    applicationCard: {
+      backgroundColor: theme.surface,
+      borderRadius: 12,
+      padding: 16,
+      marginBottom: 12,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: theme.isDark ? 0 : 0.05,
+      shadowRadius: 2,
+      elevation: theme.isDark ? 0 : 1,
+      borderWidth: theme.isDark ? 1 : 0,
+      borderColor: theme.borderStrong,
+    },
+    rejectedCard: {
+      borderLeftWidth: 4,
+      borderLeftColor: '#EF4444',
+      opacity: 0.85,
+    },
+    cardHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      marginBottom: 12,
+    },
+    companyInfo: {
+      flex: 1,
+    },
+    companyName: {
+      fontSize: 16,
+      fontWeight: 'bold',
+      color: theme.text,
+      marginBottom: 4,
+    },
+    jobTitle: {
+      fontSize: 14,
+      color: theme.textSecondary,
+    },
+    jobDetails: {
+      gap: 8,
+      marginBottom: 12,
+    },
+    detailRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    detailText: {
+      fontSize: 14,
+      color: theme.textSecondary,
+    },
+    deadline: {
+      paddingTop: 12,
+      borderTopWidth: 1,
+      borderTopColor: theme.border,
+    },
+    deadlineText: {
+      fontSize: 12,
+      color: theme.danger,
+      fontWeight: '500',
+    },
+  });
+}

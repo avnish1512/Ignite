@@ -20,8 +20,7 @@ import {
 import { useCallback } from 'react';
 import { useAuth } from '@/hooks/auth-store';
 import { useJobs } from '@/hooks/jobs-store';
-import { db } from '@/config/firebase';
-import { collection, getCountFromServer } from 'firebase/firestore';
+import { supabase } from '@/config/supabase';
 
 export default function AdminDashboard() {
   const { admin, logout } = useAuth();
@@ -32,9 +31,11 @@ export default function AdminDashboard() {
   useFocusEffect(
     useCallback(() => {
       loadData();
-      // Fetch real student count from Firestore
-      getCountFromServer(collection(db, 'students'))
-        .then(snap => setStudentCount(snap.data().count))
+      // Fetch real student count from Supabase
+      supabase
+        .from('students')
+        .select('id', { count: 'exact', head: true })
+        .then(({ count }) => setStudentCount(count || 0))
         .catch(() => setStudentCount(0));
     }, [loadData])
   );

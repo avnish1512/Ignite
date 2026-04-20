@@ -1,19 +1,8 @@
 import createContextHook from '@nkzw/create-context-hook';
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { db } from '@/config/firebase';
+import { supabase } from '@/config/supabase';
 import { DEFAULT_ADMIN_ID } from '@/constants/admin';
-import {
-  collection,
-  addDoc,
-  query,
-  where,
-  onSnapshot,
-  setDoc,
-  doc,
-  serverTimestamp,
-  getDocs,
-  Unsubscribe
-} from 'firebase/firestore';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 
 export interface Message {
   id: string;
@@ -36,57 +25,81 @@ export interface Conversation {
   lastMessage: string;
   lastMessageTime: Date;
   unreadCount: number;
+  // P2P fields
+  type?: 'admin' | 'peer';
+  peerId?: string;
+  peerName?: string;
+  participants?: string[];
 }
 
 export const [MessagingProvider, useMessaging] = createContextHook(() => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentConversationId, setCurrentConversation] = useState<string | null>(null);
-  const unsubscriptionRefs = useRef<{ [key: string]: Unsubscribe }>({});
-  const parentUnsubscribeRef = useRef<Unsubscribe | null>(null);
+  const channelRefs = useRef<{ [key: string]: RealtimeChannel }>({});
+  const parentChannelRef = useRef<RealtimeChannel | null>(null);
 
   // Generate conversation ID (consistent between two users)
   const getConversationId = useCallback((userId1: string, userId2: string) => {
     return [userId1, userId2].sort().join('_');
   }, []);
 
-  // Real-time listener for messages in a conversation
+  // Real-time listener for messages in a conversation using Supabase
   const setupMessageListener = useCallback((conversationId: string) => {
     try {
       // Unsubscribe from previous listener if exists
-      if (unsubscriptionRefs.current[conversationId]) {
-        unsubscriptionRefs.current[conversationId]();
+      if (channelRefs.current[conversationId]) {
+        supabase.removeChannel(channelRefs.current[conversationId]);
       }
 
-      const messagesRef = collection(db, 'conversations', conversationId, 'messages');
-      const q = query(messagesRef);
+      // Subscribe to real-time changes
+      const channel = supabase
+        .channel(`messages:${conversationId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'messages',
+            filter: `conversation_id=eq.${conversationId}`
+          },
+          async (payload) => {
+            // Fetch updated messages when changes occur
+            const { data, error } = await supabase
+              .from('messages')
+              .select('*')
+              .eq('conversation_id', conversationId)
+              .order('timestamp', { ascending: true });
 
-      const unsubscribe = onSnapshot(q, (querySnapshot) => {
-        const loadedMessages = querySnapshot.docs
-          .map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          }))
-          // Sort by timestamp ascending (in-memory, no index needed)
-          .sort((a: any, b: any) => {
-            const timeA = a.timestamp?.toMillis?.() ?? 0;
-            const timeB = b.timestamp?.toMillis?.() ?? 0;
-            return timeA - timeB;
-          }) as Message[];
+            if (!error && data) {
+              const loadedMessages = data.map((msg: any) => ({
+                id: msg.id,
+                senderId: msg.sender_id,
+                senderName: msg.sender_name,
+                senderRole: msg.sender_role,
+                recipientId: msg.recipient_id,
+                text: msg.text,
+                timestamp: msg.timestamp,
+                read: msg.read
+              })) as Message[];
 
-        // Update conversation messages in real-time
-        setConversations(prev =>
-          prev.map(conv =>
-            conv.id === conversationId
-              ? { ...conv, messages: loadedMessages }
-              : conv
-          )
-        );
-      }, (error) => {
-        console.error('Error listening to messages:', error);
-      });
+              // Update conversation messages in real-time
+              setConversations(prev =>
+                prev.map(conv =>
+                  conv.id === conversationId
+                    ? { ...conv, messages: loadedMessages }
+                    : conv
+                )
+              );
+            }
+          }
+        )
+        .subscribe();
 
-      unsubscriptionRefs.current[conversationId] = unsubscribe;
-      return unsubscribe;
+      channelRefs.current[conversationId] = channel;
+      return () => {
+        supabase.removeChannel(channel);
+        delete channelRefs.current[conversationId];
+      };
     } catch (error) {
       console.error('Error setting up message listener:', error);
       return () => {};
@@ -98,39 +111,60 @@ export const [MessagingProvider, useMessaging] = createContextHook(() => {
     studentId: string,
     studentName: string,
     text: string,
-    adminId?: string  // Optional admin ID parameter
+    adminId?: string
   ) => {
     try {
-      // Use provided adminId or default to DEFAULT_ADMIN_ID constant
       const finalAdminId = adminId || DEFAULT_ADMIN_ID;
       const conversationId = getConversationId(studentId, finalAdminId);
 
-      // Ensure listener is set up BEFORE sending message
+      // Ensure listener is set up
       setupMessageListener(conversationId);
 
+      // Create or ensure conversation exists
+      const { data: convData } = await supabase
+        .from('conversations')
+        .select('id')
+        .eq('id', conversationId)
+        .maybeSingle();
+
+      if (!convData) {
+        await supabase.from('conversations').insert({
+          id: conversationId,
+          student_id: studentId,
+          student_name: studentName,
+          admin_id: finalAdminId,
+          admin_name: 'Admin',
+          participants: [studentId, finalAdminId],
+          last_message: text,
+          last_message_time: new Date().toISOString()
+        });
+      }
+
       // Add message
-      const messagesRef = collection(db, 'conversations', conversationId, 'messages');
-      await addDoc(messagesRef, {
-        senderId: studentId,
-        senderName: studentName,
-        senderRole: 'student',
-        recipientId: finalAdminId,
+      const { error: msgError } = await supabase.from('messages').insert({
+        conversation_id: conversationId,
+        sender_id: studentId,
+        sender_name: studentName,
+        sender_role: 'student',
+        recipient_id: finalAdminId,
         text,
-        timestamp: serverTimestamp(),
+        timestamp: new Date().toISOString(),
         read: false
       });
 
+      if (msgError) {
+        console.error('Error inserting message:', msgError);
+        return;
+      }
+
       // Update conversation metadata
-      const conversationRef = doc(db, 'conversations', conversationId);
-      await setDoc(conversationRef, {
-        studentId,
-        studentName,
-        adminId: finalAdminId,
-        adminName: 'Admin',
-        lastMessage: text,
-        lastMessageTime: serverTimestamp()
-      }, { merge: true });
-      
+      await supabase.from('conversations')
+        .update({
+          last_message: text,
+          last_message_time: new Date().toISOString()
+        })
+        .eq('id', conversationId);
+
       console.log('✅ Message sent:', { conversationId, studentId, text });
     } catch (error) {
       console.error('Error sending message as student:', error);
@@ -145,28 +179,33 @@ export const [MessagingProvider, useMessaging] = createContextHook(() => {
     text: string
   ) => {
     try {
-      // Extract student ID from conversation
       const parts = conversationId.split('_');
       const studentId = parts[0] === adminId ? parts[1] : parts[0];
 
       // Add message
-      const messagesRef = collection(db, 'conversations', conversationId, 'messages');
-      await addDoc(messagesRef, {
-        senderId: adminId,
-        senderName: adminName,
-        senderRole: 'admin',
-        recipientId: studentId,
+      const { error: msgError } = await supabase.from('messages').insert({
+        conversation_id: conversationId,
+        sender_id: adminId,
+        sender_name: adminName,
+        sender_role: 'admin',
+        recipient_id: studentId,
         text,
-        timestamp: serverTimestamp(),
+        timestamp: new Date().toISOString(),
         read: false
       });
 
+      if (msgError) {
+        console.error('Error inserting message:', msgError);
+        return;
+      }
+
       // Update conversation metadata
-      const conversationRef = doc(db, 'conversations', conversationId);
-      await setDoc(conversationRef, {
-        lastMessage: text,
-        lastMessageTime: serverTimestamp()
-      }, { merge: true });
+      await supabase.from('conversations')
+        .update({
+          last_message: text,
+          last_message_time: new Date().toISOString()
+        })
+        .eq('id', conversationId);
     } catch (error) {
       console.error('Error sending message as admin:', error);
     }
@@ -175,93 +214,113 @@ export const [MessagingProvider, useMessaging] = createContextHook(() => {
   // Mark messages as read
   const markMessagesAsRead = useCallback(async (conversationId: string) => {
     try {
-      const messagesRef = collection(db, 'conversations', conversationId, 'messages');
-      const querySnapshot = await getDocs(messagesRef);
+      const { error } = await supabase
+        .from('messages')
+        .update({ read: true })
+        .eq('conversation_id', conversationId)
+        .eq('read', false);
 
-      querySnapshot.docs.forEach(docSnap => {
-        if (!docSnap.data().read) {
-          setDoc(
-            doc(db, 'conversations', conversationId, 'messages', docSnap.id),
-            { read: true },
-            { merge: true }
-          ).catch(err => console.error('Error marking read:', err));
-        }
-      });
+      if (error) {
+        console.error('Error marking messages as read:', error);
+      }
     } catch (error) {
       console.error('Error marking messages as read:', error);
     }
   }, []);
 
-  // Get student conversation (for student view)
-  const getStudentConversation = useCallback(async (studentId: string, adminId?: string) => {
+  // Get student conversation
+  const getStudentConversation = useCallback(async (studentId: string, adminId?: string, studentName?: string) => {
     try {
-      // Use provided adminId or default to DEFAULT_ADMIN_ID constant
       const finalAdminId = adminId || DEFAULT_ADMIN_ID;
       const conversationId = getConversationId(studentId, finalAdminId);
 
-      // Check if conversation already exists in state
-      let existingConv = conversations.find(c => c.id === conversationId);
+      // Check if already in state
+      const existingConv = conversations.find(c => c.id === conversationId);
       if (existingConv) {
-        // Ensure listener is set up
         if (!existingConv.messages || existingConv.messages.length === 0) {
           setupMessageListener(conversationId);
         }
         return existingConv;
       }
 
-      // Get or create conversation
-      const conversationRef = doc(db, 'conversations', conversationId);
-      const convSnapshot = await getDocs(collection(db, 'conversations'));
-      
-      let conversation = convSnapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() }))
-        .find((c: any) => c.id === conversationId) as any;
+      // Fetch from database
+      const { data: convData, error: convError } = await supabase
+        .from('conversations')
+        .select('*')
+        .eq('id', conversationId)
+        .maybeSingle();
+
+      let conversation: any = convData;
 
       if (!conversation) {
-        // Create conversation if it doesn't exist
-        await setDoc(conversationRef, {
-          studentId,
-          studentName: 'Student',
-          adminId: finalAdminId,
-          adminName: 'Admin',
-          lastMessage: 'No messages yet',
-          lastMessageTime: serverTimestamp()
-        });
+        console.log('🆕 Creating new conversation for:', studentName || 'Student');
+        // Create new conversation
+        const { data: newConv, error: createError } = await supabase
+          .from('conversations')
+          .insert({
+            id: conversationId,
+            student_id: studentId,
+            student_name: studentName || 'Student',
+            admin_id: finalAdminId,
+            admin_name: 'Admin',
+            participants: [studentId, finalAdminId],
+            last_message: 'No messages yet',
+            last_message_time: new Date().toISOString()
+          })
+          .select()
+          .single();
 
-        conversation = {
-          id: conversationId,
-          studentId,
-          studentName: 'Student',
-          adminId: finalAdminId,
-          adminName: 'Admin',
-          lastMessage: 'No messages yet',
-          lastMessageTime: new Date()
-        };
+        if (createError) {
+          console.error('❌ Error creating conversation:', createError);
+          // Try to refetch in case it was created concurrently
+          const { data: retryData } = await supabase
+            .from('conversations')
+            .select('*')
+            .eq('id', conversationId)
+            .maybeSingle();
+          conversation = retryData;
+        } else {
+          conversation = newConv;
+        }
       }
 
-      // Create conversation object
+      // Fetch messages
+      const { data: messagesData } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('conversation_id', conversationId)
+        .order('timestamp', { ascending: true });
+
+      const messages = (messagesData || []).map((msg: any) => ({
+        id: msg.id,
+        senderId: msg.sender_id,
+        senderName: msg.sender_name,
+        senderRole: msg.sender_role,
+        recipientId: msg.recipient_id,
+        text: msg.text,
+        timestamp: msg.timestamp,
+        read: msg.read
+      })) as Message[];
+
       const conversationObj: Conversation = {
         id: conversationId,
-        studentId: conversation.studentId || studentId,
-        studentName: conversation.studentName || 'Student',
-        adminId: conversation.adminId || finalAdminId,
-        adminName: conversation.adminName || 'Admin',
-        messages: [],
-        lastMessage: conversation.lastMessage || 'No messages yet',
-        lastMessageTime: conversation.lastMessageTime || new Date(),
-        unreadCount: 0
+        studentId: conversation.student_id || studentId,
+        studentName: conversation.student_name || 'Student',
+        adminId: conversation.admin_id || finalAdminId,
+        adminName: conversation.admin_name || 'Admin',
+        messages,
+        lastMessage: conversation.last_message || 'No messages yet',
+        lastMessageTime: new Date(conversation.last_message_time || Date.now()),
+        unreadCount: messages.filter(m => !m.read && m.recipientId === studentId).length
       };
 
-      // Add to state
       setConversations(prev => {
         const exists = prev.find(c => c.id === conversationId);
         if (exists) return prev;
         return [...prev, conversationObj];
       });
 
-      // Set up real-time listener
       setupMessageListener(conversationId);
-
       return conversationObj;
     } catch (error) {
       console.error('Error getting student conversation:', error);
@@ -269,60 +328,121 @@ export const [MessagingProvider, useMessaging] = createContextHook(() => {
     }
   }, [getConversationId, setupMessageListener, conversations]);
 
-  // Get admin conversations with real-time updates (for admin view)
+  // Get admin conversations with real-time updates
   const getAdminConversations = useCallback(async (adminId: string) => {
     try {
-      // Set up real-time listener for admin's conversations
-      // NOTE: We avoid combining where() + orderBy() on different fields
-      // to prevent requiring a Firestore composite index.
-      // Sorting is done in-memory instead.
-      const conversationsRef = collection(db, 'conversations');
-      const q = query(
-        conversationsRef,
-        where('adminId', '==', adminId)
-      );
+      const channel = supabase
+        .channel(`conversations:admin:${adminId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'conversations',
+            filter: `admin_id=eq.${adminId}`
+          },
+          async () => {
+            // Refetch conversations when changes occur
+            const { data } = await supabase
+              .from('conversations')
+              .select('*')
+              .eq('admin_id', adminId)
+              .order('last_message_time', { ascending: false });
 
-      const unsubscribe = onSnapshot(q, (querySnapshot) => {
-        const convs = querySnapshot.docs
-          .map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          }))
-          // Sort in-memory (avoids composite index requirement)
-          .sort((a: any, b: any) => {
-            const timeA = a.lastMessageTime?.toMillis?.() ?? 0;
-            const timeB = b.lastMessageTime?.toMillis?.() ?? 0;
-            return timeB - timeA;
-          }) as any[];
+            if (data) {
+              // Fetch messages for each conversation and set up listeners
+              const convsWithMessages = await Promise.all(data.map(async (c) => {
+                const { data: msgData } = await supabase
+                  .from('messages')
+                  .select('*')
+                  .eq('conversation_id', c.id)
+                  .order('timestamp', { ascending: true });
 
-        // Update conversations with messages subscriptions
-        setConversations(prevConvs => {
-          const updated = convs.map(c => {
-            const existing = prevConvs.find(p => p.id === c.id);
-            // Set up listener for this conversation if not already listening
-            setupMessageListener(c.id);
-            return {
-              id: c.id,
-              studentId: c.studentId,
-              studentName: c.studentName,
-              adminId: c.adminId,
-              adminName: c.adminName,
-              messages: existing?.messages || [],
-              lastMessage: c.lastMessage || '',
-              lastMessageTime: c.lastMessageTime || new Date(),
-              unreadCount: 0
-            };
-          });
-          return updated;
-        });
-      }, (error) => {
-        console.error('Error listening to admin conversations:', error);
-      });
+                const messages = (msgData || []).map((msg: any) => ({
+                  id: msg.id,
+                  senderId: msg.sender_id,
+                  senderName: msg.sender_name,
+                  senderRole: msg.sender_role,
+                  recipientId: msg.recipient_id,
+                  text: msg.text,
+                  timestamp: msg.timestamp,
+                  read: msg.read
+                })) as Message[];
 
-      // Store unsubscription
-      parentUnsubscribeRef.current = unsubscribe;
+                setupMessageListener(c.id);
+                
+                return {
+                  id: c.id,
+                  studentId: c.student_id,
+                  studentName: c.student_name,
+                  adminId: c.admin_id,
+                  adminName: c.admin_name,
+                  messages,
+                  lastMessage: c.last_message || '',
+                  lastMessageTime: new Date(c.last_message_time || Date.now()),
+                  unreadCount: messages.filter(m => !m.read && m.senderRole === 'student').length,
+                  participants: c.participants,
+                  type: c.admin_id === 'admin' ? 'admin' : 'peer' // Corrected inference
+                } as Conversation;
+              }));
 
-      return unsubscribe;
+              setConversations(convsWithMessages);
+            }
+          }
+        )
+        .subscribe();
+
+      parentChannelRef.current = channel;
+
+      // Initial fetch: find any conversation where admin is a participant
+      const { data } = await supabase
+        .from('conversations')
+        .select('*')
+        .or(`admin_id.eq.${adminId},participants.cs.{${adminId}}`)
+        .order('last_message_time', { ascending: false });
+
+      if (data) {
+        // Fetch messages for each conversation
+        const convsWithMessages = await Promise.all(data.map(async (c) => {
+          const { data: msgData } = await supabase
+            .from('messages')
+            .select('*')
+            .eq('conversation_id', c.id)
+            .order('timestamp', { ascending: true });
+
+          const messages = (msgData || []).map((msg: any) => ({
+            id: msg.id,
+            senderId: msg.sender_id,
+            senderName: msg.sender_name,
+            senderRole: msg.sender_role,
+            recipientId: msg.recipient_id,
+            text: msg.text,
+            timestamp: msg.timestamp,
+            read: msg.read
+          })) as Message[];
+
+          setupMessageListener(c.id);
+          
+          return {
+            id: c.id,
+            studentId: c.student_id,
+            studentName: c.student_name,
+            adminId: c.admin_id,
+            adminName: c.admin_name,
+            messages,
+            lastMessage: c.last_message || '',
+            lastMessageTime: new Date(c.last_message_time || Date.now()),
+            unreadCount: messages.filter(m => !m.read && m.senderRole === 'student').length,
+            participants: c.participants
+          } as Conversation;
+        }));
+
+        setConversations(convsWithMessages);
+      }
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
     } catch (error) {
       console.error('Error getting admin conversations:', error);
       return () => {};
@@ -345,17 +465,298 @@ export const [MessagingProvider, useMessaging] = createContextHook(() => {
       }));
   }, [conversations]);
 
+  // Peer conversation support
+  const getOrCreatePeerConversation = useCallback(async (
+    myId: string,
+    myName: string,
+    peerId: string,
+    peerName: string
+  ) => {
+    try {
+      const conversationId = getConversationId(myId, peerId);
+
+      const existing = conversations.find(c => c.id === conversationId);
+      if (existing) {
+        setupMessageListener(conversationId);
+        return existing;
+      }
+
+      const { data: convData } = await supabase
+        .from('conversations')
+        .select('*')
+        .eq('id', conversationId)
+        .maybeSingle();
+
+      if (!convData) {
+        await supabase.from('conversations').insert({
+          id: conversationId,
+          student_id: myId,
+          student_name: myName,
+          admin_id: peerId,
+          admin_name: peerName,
+          participants: [myId, peerId],
+          last_message: '',
+          last_message_time: new Date().toISOString()
+        });
+      }
+
+      const conversationObj: Conversation = {
+        id: conversationId,
+        studentId: myId,
+        studentName: myName,
+        adminId: peerId,
+        adminName: peerName,
+        messages: [],
+        lastMessage: '',
+        lastMessageTime: new Date(),
+        unreadCount: 0,
+        type: 'peer',
+        peerId,
+        peerName,
+        participants: [myId, peerId]
+      };
+
+      setConversations(prev => {
+        if (prev.find(c => c.id === conversationId)) return prev;
+        return [...prev, conversationObj];
+      });
+
+      setupMessageListener(conversationId);
+      return conversationObj;
+    } catch (error) {
+      console.error('Error creating peer conversation:', error);
+      return null;
+    }
+  }, [getConversationId, setupMessageListener, conversations]);
+
+  // Send peer message
+  const sendPeerMessage = useCallback(async (
+    conversationId: string,
+    senderId: string,
+    senderName: string,
+    recipientId: string,
+    text: string
+  ) => {
+    try {
+      setupMessageListener(conversationId);
+
+      const { error: msgError } = await supabase.from('messages').insert({
+        conversation_id: conversationId,
+        sender_id: senderId,
+        sender_name: senderName,
+        sender_role: 'student',
+        recipient_id: recipientId,
+        text,
+        timestamp: new Date().toISOString(),
+        read: false
+      });
+
+      if (msgError) {
+        console.error('Error inserting message:', msgError);
+        return;
+      }
+
+      await supabase.from('conversations')
+        .update({
+          last_message: text,
+          last_message_time: new Date().toISOString()
+        })
+        .eq('id', conversationId);
+
+      console.log('✅ Peer message sent:', { conversationId, senderId, text });
+    } catch (error) {
+      console.error('Error sending peer message:', error);
+    }
+  }, [setupMessageListener]);
+
+  // Load all student conversations
+  const loadStudentConversations = useCallback(async (studentId: string) => {
+    try {
+      console.log('📱 Loading student conversations for:', studentId);
+      
+      // Setup a more broad channel that listens to conversations where I am a participant
+      const channel = supabase
+        .channel(`conversations:student:${studentId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'conversations'
+          },
+          async (payload: any) => {
+              // Check if I am part of this conversation
+              const conv = payload.new;
+              if (conv && (conv.student_id === studentId || conv.admin_id === studentId || (conv.participants && conv.participants.includes(studentId)))) {
+                console.log('🔄 Conversation update detected, refetching list...');
+                
+                const { data } = await supabase
+                  .from('conversations')
+                  .select('*')
+                  .or(`student_id.eq.${studentId},admin_id.eq.${studentId},participants.cs.{${studentId}}`)
+                  .order('last_message_time', { ascending: false });
+
+                if (data) {
+                  const convsWithMessages = await Promise.all(data.map(async (c) => {
+                    const { data: msgData } = await supabase
+                      .from('messages')
+                      .select('*')
+                      .eq('conversation_id', c.id)
+                      .order('timestamp', { ascending: true });
+
+                    const messages = (msgData || []).map((msg: any) => ({
+                      id: msg.id,
+                      senderId: msg.sender_id,
+                      senderName: msg.sender_name,
+                      senderRole: msg.sender_role,
+                      recipientId: msg.recipient_id,
+                      text: msg.text,
+                      timestamp: msg.timestamp,
+                      read: msg.read
+                    })) as Message[];
+
+                    setupMessageListener(c.id);
+                    
+                    return {
+                      id: c.id,
+                      studentId: c.student_id,
+                      studentName: c.student_name,
+                      adminId: c.admin_id,
+                      adminName: c.admin_name,
+                      messages,
+                      lastMessage: c.last_message || '',
+                      lastMessageTime: new Date(c.last_message_time || Date.now()),
+                      unreadCount: messages.filter(m => !m.read && m.senderId !== studentId).length,
+                      type: c.type || (c.admin_id === 'admin' ? 'admin' : 'peer'),
+                      participants: c.participants || []
+                    } as Conversation;
+                  }));
+
+                  setConversations(convsWithMessages);
+                }
+              }
+            }
+        )
+        .subscribe();
+
+      parentChannelRef.current = channel;
+
+      // Initial fetch
+      const { data } = await supabase
+        .from('conversations')
+        .select('*')
+        .or(`student_id.eq.${studentId},participants.cs.{${studentId}}`)
+        .order('last_message_time', { ascending: false });
+
+      if (data) {
+        const convsWithMessages = await Promise.all(data.map(async (c) => {
+          const { data: msgData } = await supabase
+            .from('messages')
+            .select('*')
+            .eq('conversation_id', c.id)
+            .order('timestamp', { ascending: true });
+
+          const messages = (msgData || []).map((msg: any) => ({
+            id: msg.id,
+            senderId: msg.sender_id,
+            senderName: msg.sender_name,
+            senderRole: msg.sender_role,
+            recipientId: msg.recipient_id,
+            text: msg.text,
+            timestamp: msg.timestamp,
+            read: msg.read
+          })) as Message[];
+
+          setupMessageListener(c.id);
+          
+          return {
+            id: c.id,
+            studentId: c.student_id || studentId,
+            studentName: c.student_name || 'Student',
+            adminId: c.admin_id || '',
+            adminName: c.admin_name || 'Admin',
+            messages,
+            lastMessage: c.last_message || '',
+            lastMessageTime: new Date(c.last_message_time || Date.now()),
+            unreadCount: messages.filter(m => !m.read && m.senderRole !== 'student').length,
+            type: c.admin_id === 'admin' ? 'admin' : 'peer',
+            participants: c.participants || []
+          } as Conversation;
+        }));
+
+        setConversations(convsWithMessages);
+      }
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    } catch (error) {
+      console.error('Error loading student conversations:', error);
+      return () => {};
+    }
+  }, [setupMessageListener]);
+
+  // Explicitly load messages for a conversation
+  const loadMessages = useCallback(async (conversationId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('conversation_id', conversationId)
+        .order('timestamp', { ascending: true });
+
+      if (!error && data) {
+        const loadedMessages = data.map((msg: any) => ({
+          id: msg.id,
+          senderId: msg.sender_id,
+          senderName: msg.sender_name,
+          senderRole: msg.sender_role,
+          recipientId: msg.recipient_id,
+          text: msg.text,
+          timestamp: msg.timestamp,
+          read: msg.read
+        })) as Message[];
+
+        setConversations(prev =>
+          prev.map(conv =>
+            conv.id === conversationId
+              ? { ...conv, messages: loadedMessages }
+              : conv
+          )
+        );
+      }
+    } catch (error) {
+      console.error('Error loading messages:', error);
+    }
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      // Unsubscribe from all channels
+      Object.values(channelRefs.current).forEach(channel => {
+        supabase.removeChannel(channel);
+      });
+      if (parentChannelRef.current) {
+        supabase.removeChannel(parentChannelRef.current);
+      }
+    };
+  }, []);
+
   return {
     conversations,
     currentConversationId,
-    getStudentConversation,
+    setCurrentConversation,
     sendMessageAsStudent,
+    sendMessageAsAdmin,
     markMessagesAsRead,
+    getStudentConversation,
     getAdminConversations,
     getStudentSpecificConversation,
-    sendMessageAsAdmin,
     getStudentsForAdmin,
-    setCurrentConversation,
-    setupMessageListener
+    getOrCreatePeerConversation,
+    sendPeerMessage,
+    loadStudentConversations,
+    loadMessages
   };
 });

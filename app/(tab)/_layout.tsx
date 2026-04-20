@@ -4,8 +4,10 @@ import React, { useEffect, useState } from "react";
 import { useNotifications } from "@/hooks/notifications-store";
 import { useMessaging } from "@/hooks/messaging-store";
 import { useAuth } from "@/hooks/auth-store";
+import { useTheme } from "@/hooks/theme-store";
 
 export default function TabLayout() {
+  const theme = useTheme();
   const { student } = useAuth();
   const { unreadCount: notificationCount } = useNotifications();
   const { conversations } = useMessaging();
@@ -24,13 +26,13 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: '#6366F1',
-        tabBarInactiveTintColor: '#9CA3AF',
+        tabBarActiveTintColor: theme.primary,
+        tabBarInactiveTintColor: theme.textMuted,
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: '#FFFFFF',
+          backgroundColor: theme.tabBar,
           borderTopWidth: 1,
-          borderTopColor: '#F3F4F6',
+          borderTopColor: theme.border,
           paddingBottom: 8,
           paddingTop: 8,
           height: 88,

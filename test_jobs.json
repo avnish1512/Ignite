@@ -1,0 +1,36 @@
+[
+  {
+    "id": "test_job_google_1",
+    "title": "Software Engineer",
+    "company": "Google",
+    "location": "Pune (Remote)",
+    "ctc": {"min": 3200000, "max": 4500000},
+    "job_type": "Full-time",
+    "industry": "Technology",
+    "requirements": ["B.Tech/BE in CS", "3.5+ CGPA", "Strong DS/Algo"],
+    "description": "Join Google's Cloud Platform team to build scalable services used by millions.",
+    "skills": ["Go", "Kubernetes", "GCP"],
+    "eligibility_status": "open",
+    "registration_deadline": "2026-05-30T18:30:00Z",
+    "posted_date": "2026-04-20T10:00:00Z",
+    "is_active": true,
+    "drive_date": "2026-06-15T09:00:00Z"
+  },
+  {
+    "id": "test_job_nvidia_1",
+    "title": "AI Research Intern",
+    "company": "NVIDIA",
+    "location": "Bangalore",
+    "ctc": {"min": 800000, "max": 1200000},
+    "job_type": "Internship",
+    "industry": "Artificial Intelligence",
+    "requirements": ["Pursuing B.Tech/M.Tech", "Experience with PyTorch", "CUDA knowledge"],
+    "description": "Optimize deep learning frameworks for next-generation GPU architectures.",
+    "skills": ["PyTorch", "CUDA", "C++"],
+    "eligibility_status": "open",
+    "registration_deadline": "2026-05-15T18:30:00Z",
+    "posted_date": "2026-04-20T11:00:00Z",
+    "is_active": true,
+    "drive_date": "2026-06-05T10:00:00Z"
+  }
+]

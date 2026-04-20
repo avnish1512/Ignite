@@ -1,13 +1,5 @@
 import { useState, useCallback } from 'react';
-import { storage, db } from '@/config/firebase';
-import {
-  ref,
-  uploadBytes,
-  getDownloadURL,
-  deleteObject,
-  listAll
-} from 'firebase/storage';
-import { doc, updateDoc } from 'firebase/firestore';
+import { supabase } from '@/config/supabase';
 
 export interface Resume {
   id: string;
@@ -40,48 +32,53 @@ export const useResumeUpload = () => {
       setError(null);
       setUploadProgress(0);
 
-      // Create file reference with student ID and timestamp
       const timestamp = Date.now();
       const fileExtension = file.name.split('.').pop();
       const storagePath = `resumes/${studentId}/resume_${timestamp}.${fileExtension}`;
-      const fileRef = ref(storage, storagePath);
 
-      // For web, we need to handle file upload differently
       // Convert URI to blob
       let fileBlob: Blob;
 
       if (file.uri.startsWith('file://') || file.uri.startsWith('/')) {
-        // Mobile/local file - convert to blob
         const response = await fetch(file.uri);
         fileBlob = await response.blob();
       } else if (file.uri.startsWith('http')) {
-        // Already a URL
         throw new Error('Please select a local file to upload');
       } else {
-        // Web file
         const response = await fetch(file.uri);
         fileBlob = await response.blob();
       }
 
-      // Upload file to Firebase Storage
-      const snapshot = await uploadBytes(fileRef, fileBlob, {
-        customMetadata: {
-          studentId,
-          studentName,
-          uploadedBy: studentId
-        }
-      });
+      // Upload file to Supabase Storage
+      const { data, error: uploadError } = await supabase.storage
+        .from('resumes')
+        .upload(storagePath, fileBlob, {
+          upsert: true,
+          contentType: file.type || 'application/octet-stream'
+        });
+
+      if (uploadError) throw uploadError;
 
       // Get download URL
-      const downloadUrl = await getDownloadURL(snapshot.ref);
+      const { data: publicUrlData } = supabase.storage
+        .from('resumes')
+        .getPublicUrl(storagePath);
+
+      const downloadUrl = publicUrlData?.publicUrl;
+      if (!downloadUrl) throw new Error('Failed to get download URL');
 
       // Update student profile with resume URL
-      await updateDoc(doc(db, 'students', studentId), {
-        resume: downloadUrl,
-        resumePath: storagePath,
-        resumeFileName: file.name,
-        resumeUploadedDate: new Date()
-      });
+      const { error: updateError } = await supabase
+        .from('students')
+        .update({
+          resume: downloadUrl,
+          resume_path: storagePath,
+          resume_file_name: file.name,
+          resume_uploaded_date: new Date().toISOString()
+        })
+        .eq('id', studentId);
+
+      if (updateError) throw updateError;
 
       setUploadProgress(100);
       return {
@@ -110,19 +107,27 @@ export const useResumeUpload = () => {
     try {
       setError(null);
 
-      // Delete from Firebase Storage
+      // Delete from Supabase Storage
       if (resumePath) {
-        const fileRef = ref(storage, resumePath);
-        await deleteObject(fileRef);
+        const { error: deleteError } = await supabase.storage
+          .from('resumes')
+          .remove([resumePath]);
+
+        if (deleteError) throw deleteError;
       }
 
       // Update student profile to remove resume
-      await updateDoc(doc(db, 'students', studentId), {
-        resume: null,
-        resumePath: null,
-        resumeFileName: null,
-        resumeUploadedDate: null
-      });
+      const { error: updateError } = await supabase
+        .from('students')
+        .update({
+          resume: null,
+          resume_path: null,
+          resume_file_name: null,
+          resume_uploaded_date: null
+        })
+        .eq('id', studentId);
+
+      if (updateError) throw updateError;
 
       return { success: true, message: 'Resume deleted successfully' };
     } catch (err) {
@@ -135,20 +140,25 @@ export const useResumeUpload = () => {
   // Get student's resumes
   const getStudentResumes = useCallback(async (studentId: string) => {
     try {
-      const folderRef = ref(storage, `resumes/${studentId}`);
-      const fileList = await listAll(folderRef);
+      const { data, error } = await supabase.storage
+        .from('resumes')
+        .list(`${studentId}/`);
+
+      if (error) throw error;
 
       const resumesList: Resume[] = [];
-      for (const file of fileList.items) {
-        const downloadUrl = await getDownloadURL(file);
+      for (const file of data || []) {
+        const { data: publicUrlData } = supabase.storage
+          .from('resumes')
+          .getPublicUrl(`${studentId}/${file.name}`);
 
         resumesList.push({
           id: file.name,
           studentId,
           fileName: file.name.split('_')[1] || file.name,
-          fileSize: 0,
-          uploadedDate: new Date(),
-          downloadUrl,
+          fileSize: file.metadata?.size || 0,
+          uploadedDate: new Date(file.created_at || Date.now()),
+          downloadUrl: publicUrlData?.publicUrl || '',
           isDefault: false
         });
       }
@@ -164,8 +174,6 @@ export const useResumeUpload = () => {
   // Download resume
   const downloadResume = useCallback(async (downloadUrl: string, fileName: string) => {
     try {
-      // On mobile, open the download URL
-      // On web, trigger download
       if (typeof window !== 'undefined') {
         const link = document.createElement('a');
         link.href = downloadUrl;

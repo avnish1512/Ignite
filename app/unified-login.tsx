@@ -4,8 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, router } from 'expo-router';
 import { Eye, EyeOff } from 'lucide-react-native';
 import { useAuth } from '@/hooks/auth-store';
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from '@/config/firebase';
+import { supabase } from '@/config/supabase';
 
 const { width: screenWidth } = Dimensions.get('window');
 const isTablet = screenWidth >= 768;
@@ -33,30 +32,33 @@ export default function UnifiedLoginScreen() {
       if (role === 'admin') {
         router.replace('/admin-dashboard' as any);
       } else {
-        // For students: check Firestore for profileCompleted flag
+        // For students: check Supabase for profileCompleted flag
         // This determines if they are new (go to info form) or returning (go to dashboard)
         try {
-          const { getAuth } = await import('firebase/auth');
-          const firebaseUser = getAuth().currentUser;
+          const { data: { user } } = await supabase.auth.getUser();
 
-          if (firebaseUser) {
-            const studentRef = doc(db, 'students', firebaseUser.uid);
-            const studentSnap = await getDoc(studentRef);
+          if (user) {
+            const { data: studentData, error: studentError } = await supabase
+              .from('students')
+              .select('profile_completed')
+              .eq('id', user.id)
+              .maybeSingle();
 
-            if (studentSnap.exists()) {
-              const data = studentSnap.data();
-              if (data?.profileCompleted === true) {
-                // Returning student — go straight to dashboard
-                router.replace('/(tab)');
-              } else {
-                // New student — go to profile information form
-                router.replace('/profile-setup' as any);
-              }
+            if (studentError) {
+              console.error('Error fetching student data:', studentError);
+              router.replace('/profile-setup' as any);
+              return;
+            }
+
+            if (studentData?.profile_completed === true) {
+              // Returning student — go straight to dashboard
+              router.replace('/(tab)');
             } else {
-              // No Firestore doc at all — treat as new, go to profile setup
+              // New student — go to profile information form
               router.replace('/profile-setup' as any);
             }
           } else {
+            // Not logged in, shouldn't happen
             router.replace('/(tab)');
           }
         } catch (err) {
@@ -66,7 +68,13 @@ export default function UnifiedLoginScreen() {
         }
       }
     } else {
-      Alert.alert('Login Failed', result.error || 'Invalid credentials. Please check your email and password.');
+      let errorMsg = result.error || 'Invalid credentials.';
+      if (errorMsg.includes('rate limit')) {
+        errorMsg = 'EMAIL RATE LIMIT EXCEEDED:\n\nPlease disable "Confirm email" in your Supabase Dashboard -> Auth -> Providers -> Email to continue testing.';
+      } else if (errorMsg.includes('verify')) {
+        errorMsg = 'Please verify your email or disable "Confirm email" in Supabase Auth settings.';
+      }
+      Alert.alert('Login Failed', errorMsg);
     }
   };
 

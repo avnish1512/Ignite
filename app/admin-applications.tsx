@@ -4,13 +4,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, router } from 'expo-router';
 import { ArrowLeft, Search, FileText, User, Building2, Calendar, Filter, CheckCircle, XCircle, Clock } from 'lucide-react-native';
 import { useJobs } from '@/hooks/jobs-store';
+import { useNotifications } from '@/hooks/notifications-store';
 
 const { width: screenWidth } = Dimensions.get('window');
 const isTablet = screenWidth >= 768;
 const isSmallScreen = screenWidth < 375;
 
 // Constants for UI options
-const APPLICATION_STATUS_FILTERS = ['All', 'Applied', 'Shortlisted', 'Rejected'] as const;
+const APPLICATION_STATUS_FILTERS = ['All', 'Applied', 'Shortlisted', 'Interviewing', 'Selected', 'Rejected'] as const;
 const SORT_OPTIONS = [
   { key: 'date' as const, label: 'Date' },
   { key: 'name' as const, label: 'Name' },
@@ -84,6 +85,7 @@ const mockApplications = [
 
 export default function AdminApplications() {
   const { applications, jobs, updateApplicationStatus } = useJobs();
+  const { triggerApplicationStatusNotification } = useNotifications();
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<typeof APPLICATION_STATUS_FILTERS[number]>('All');
   const [sortBy, setSortBy] = useState<typeof SORT_OPTIONS[number]['key']>('date');
@@ -102,7 +104,7 @@ export default function AdminApplications() {
       jobTitle: job?.title || 'Job Removed',
       companyName: job?.company || 'Unknown Company',
       appliedDate: app.appliedDate,
-      status: app.status as 'Applied' | 'Shortlisted' | 'Rejected' | 'Under Review' | 'Selected',
+      status: app.status as 'Applied' | 'Shortlisted' | 'Interviewing' | 'Rejected' | 'Under Review' | 'Selected',
       studentCourse: app.studentCourse || 'B.Tech (Course Info Pending)',
       studentYear: app.studentYear || '3rd Year',
       studentCGPA: app.studentCGPA || 8.0,
@@ -115,10 +117,7 @@ export default function AdminApplications() {
       const matchesSearch = app.studentName.toLowerCase().includes(searchQuery.toLowerCase()) ||
                            app.companyName.toLowerCase().includes(searchQuery.toLowerCase()) ||
                            app.jobTitle.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesFilter = filterStatus === 'All' || 
-                           (filterStatus === 'Applied' && app.status === 'Applied') ||
-                           (filterStatus === 'Shortlisted' && app.status === 'Shortlisted') ||
-                           (filterStatus === 'Rejected' && app.status === 'Rejected');
+      const matchesFilter = filterStatus === 'All' || app.status === filterStatus;
       return matchesSearch && matchesFilter;
     })
     .sort((a, b) => {
@@ -132,7 +131,7 @@ export default function AdminApplications() {
       }
     });
 
-  const handleStatusChange = async (applicationId: string, newStatus: 'Applied' | 'Shortlisted' | 'Rejected' | 'Under Review' | 'Selected') => {
+  const handleStatusChange = async (applicationId: string, newStatus: 'Applied' | 'Shortlisted' | 'Interviewing' | 'Rejected' | 'Under Review' | 'Selected') => {
     try {
       setUpdating(true);
       console.log('Attempting to update application:', applicationId, 'to status:', newStatus);
@@ -141,6 +140,17 @@ export default function AdminApplications() {
       
       if (result.success) {
         console.log('Application status updated successfully');
+        
+        const appInfo = applicationsWithDetails.find(a => a.id === applicationId);
+        if (appInfo && appInfo.studentId) {
+          triggerApplicationStatusNotification(
+            appInfo.studentId,
+            newStatus,
+            appInfo.jobTitle,
+            appInfo.companyName
+          );
+        }
+        
         Alert.alert('Success', `Application status updated to ${newStatus}`);
       } else {
         console.log('Failed to update application:', result.error);
@@ -172,6 +182,10 @@ export default function AdminApplications() {
         return '#F59E0B';
       case 'Shortlisted':
         return '#10B981';
+      case 'Interviewing':
+        return '#6366F1';
+      case 'Selected':
+        return '#059669';
       case 'Rejected':
         return '#EF4444';
       default:
@@ -191,7 +205,7 @@ export default function AdminApplications() {
       jobTitle: string;
       companyName: string;
       appliedDate: string;
-      status: 'Applied' | 'Shortlisted' | 'Rejected' | 'Under Review' | 'Selected';
+      status: 'Applied' | 'Shortlisted' | 'Interviewing' | 'Rejected' | 'Under Review' | 'Selected';
       studentCourse: string;
       studentYear: string;
       studentCGPA: number | string;
@@ -246,6 +260,46 @@ export default function AdminApplications() {
           >
             <CheckCircle size={16} color="#FFFFFF" />
             <Text style={styles.shortlistButtonText}>{updating ? 'Updating...' : 'Shortlist'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.actionButton, styles.rejectButton, updating && styles.buttonDisabled]}
+            onPress={() => handleStatusChange(application.id, 'Rejected')}
+            disabled={updating}
+          >
+            <XCircle size={16} color="#FFFFFF" />
+            <Text style={styles.rejectButtonText}>{updating ? 'Updating...' : 'Reject'}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+      {(application.status === 'Shortlisted') && (
+        <View style={styles.actionButtons}>
+          <TouchableOpacity 
+            style={[styles.actionButton, { backgroundColor: '#6366F1' }, updating && styles.buttonDisabled]}
+            onPress={() => handleStatusChange(application.id, 'Interviewing')}
+            disabled={updating}
+          >
+            <Clock size={16} color="#FFFFFF" />
+            <Text style={styles.shortlistButtonText}>{updating ? 'Updating...' : 'Interviewing'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.actionButton, styles.rejectButton, updating && styles.buttonDisabled]}
+            onPress={() => handleStatusChange(application.id, 'Rejected')}
+            disabled={updating}
+          >
+            <XCircle size={16} color="#FFFFFF" />
+            <Text style={styles.rejectButtonText}>{updating ? 'Updating...' : 'Reject'}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+      {(application.status === 'Interviewing') && (
+        <View style={styles.actionButtons}>
+          <TouchableOpacity 
+            style={[styles.actionButton, { backgroundColor: '#059669' }, updating && styles.buttonDisabled]}
+            onPress={() => handleStatusChange(application.id, 'Selected')}
+            disabled={updating}
+          >
+            <CheckCircle size={16} color="#FFFFFF" />
+            <Text style={styles.shortlistButtonText}>{updating ? 'Updating...' : 'Select'}</Text>
           </TouchableOpacity>
           <TouchableOpacity 
             style={[styles.actionButton, styles.rejectButton, updating && styles.buttonDisabled]}

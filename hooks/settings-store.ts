@@ -1,117 +1,146 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
-import { db } from '@/config/firebase';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { supabase } from '@/config/supabase';
 
 export interface SettingsState {
   // Notification preferences
   pushNotifications: boolean;
   emailNotifications: boolean;
   jobAlerts: boolean;
-  
+
   // Display preferences
   darkMode: boolean;
   language: string;
-  
+
   // Security preferences
   biometricAuth: boolean;
-  
-  // app preferences
+
+  // App preferences
   appVersion: string;
-  
-  // Setters
-  setPushNotifications: (value: boolean) => void;
-  setEmailNotifications: (value: boolean) => void;
-  setJobAlerts: (value: boolean) => void;
-  setDarkMode: (value: boolean) => void;
-  setLanguage: (value: string) => void;
-  setBiometricAuth: (value: boolean) => void;
-  
+
+  // Internal: the logged-in userId so setters can auto-save with it
+  _userId: string | undefined;
+
+  // Setters — all immediately persist
+  setPushNotifications:   (value: boolean) => void;
+  setEmailNotifications:  (value: boolean) => void;
+  setJobAlerts:           (value: boolean) => void;
+  setDarkMode:            (value: boolean) => void;
+  setLanguage:            (value: string)  => void;
+  setBiometricAuth:       (value: boolean) => void;
+
   // Persistence
-  loadSettings: (userId?: string) => Promise<void>;
-  saveSettings: (userId?: string) => Promise<void>;
-  clearCache: () => Promise<void>;
+  loadSettings:  (userId?: string) => Promise<void>;
+  saveSettings:  (userId?: string) => Promise<void>;
+  clearCache:    () => Promise<void>;
+}
+
+// Internal helper to build a saveable snapshot from state
+function buildSnapshot(state: SettingsState) {
+  return {
+    pushNotifications:  state.pushNotifications,
+    emailNotifications: state.emailNotifications,
+    jobAlerts:          state.jobAlerts,
+    darkMode:           state.darkMode,
+    language:           state.language,
+    biometricAuth:      state.biometricAuth,
+    appVersion:         state.appVersion,
+    updatedAt:          new Date().toISOString(),
+  };
 }
 
 export const useSettings = create<SettingsState>((set, get) => ({
-  // Default values
-  pushNotifications: true,
+  // Defaults
+  pushNotifications:  true,
   emailNotifications: true,
-  jobAlerts: true,
-  darkMode: false,
-  language: 'en',
-  biometricAuth: false,
-  appVersion: '1.0.0',
+  jobAlerts:          true,
+  darkMode:           false,
+  language:           'en',
+  biometricAuth:      false,
+  appVersion:         '1.0.0',
+  _userId:            undefined,
 
-  setPushNotifications: (value: boolean) => {
+  // ─── Setters ────────────────────────────────────────────────────────────────
+
+  setPushNotifications: (value) => {
     set({ pushNotifications: value });
-    get().saveSettings();
+    get().saveSettings(get()._userId);
   },
 
-  setEmailNotifications: (value: boolean) => {
+  setEmailNotifications: (value) => {
     set({ emailNotifications: value });
-    get().saveSettings();
+    get().saveSettings(get()._userId);
   },
 
-  setJobAlerts: (value: boolean) => {
+  setJobAlerts: (value) => {
     set({ jobAlerts: value });
-    get().saveSettings();
+    get().saveSettings(get()._userId);
   },
 
-  setDarkMode: (value: boolean) => {
+  setDarkMode: (value) => {
     set({ darkMode: value });
-    get().saveSettings();
+    get().saveSettings(get()._userId);
   },
 
-  setLanguage: (value: string) => {
+  setLanguage: (value) => {
     set({ language: value });
-    get().saveSettings();
+    get().saveSettings(get()._userId);
   },
 
-  setBiometricAuth: (value: boolean) => {
+  setBiometricAuth: (value) => {
     set({ biometricAuth: value });
-    get().saveSettings();
+    get().saveSettings(get()._userId);
   },
+
+  // ─── Persistence ────────────────────────────────────────────────────────────
 
   loadSettings: async (userId?: string) => {
+    // Remember userId for future auto-saves
+    set({ _userId: userId });
+
     try {
-      // Try loading from Firebase first (real-time)
+      // 1️⃣ Try Supabase first
       if (userId) {
         try {
-          const settingsRef = doc(db, 'settings', userId);
-          const settingsSnap = await getDoc(settingsRef);
-          
-          if (settingsSnap.exists()) {
-            const data = settingsSnap.data();
+          const { data: settingsData, error } = await supabase
+            .from('settings')
+            .select('*')
+            .eq('user_id', userId)
+            .maybeSingle();
+
+          if (settingsData && !error) {
+            const d = settingsData;
             set({
-              pushNotifications: data.pushNotifications ?? true,
-              emailNotifications: data.emailNotifications ?? true,
-              jobAlerts: data.jobAlerts ?? true,
-              darkMode: data.darkMode ?? false,
-              language: data.language ?? 'en',
-              biometricAuth: data.biometricAuth ?? false,
-              appVersion: data.appVersion ?? '1.0.0'
+              pushNotifications:  d.push_notifications  ?? true,
+              emailNotifications: d.email_notifications ?? true,
+              jobAlerts:          d.job_alerts          ?? true,
+              darkMode:           d.dark_mode           ?? false,
+              language:           d.language            ?? 'en',
+              biometricAuth:      d.biometric_auth      ?? false,
+              appVersion:         d.app_version         ?? '1.0.0',
             });
-            console.log('✅ Settings loaded from Firebase');
+            console.log('✅ Settings loaded from Supabase');
+            // Sync to local cache
+            await AsyncStorage.setItem('app_settings', JSON.stringify(d)).catch(() => {});
             return;
           }
-        } catch (firebaseError) {
-          console.log('ℹ️ Firebase settings not available, using local storage');
+        } catch (err) {
+          console.log('ℹ️ Supabase settings unavailable, falling back to local storage');
         }
       }
 
-      // Fallback to AsyncStorage
-      const savedSettings = await AsyncStorage.getItem('app_settings');
-      if (savedSettings) {
-        const parsed = JSON.parse(savedSettings);
+      // 2️⃣ Fallback to AsyncStorage
+      const saved = await AsyncStorage.getItem('app_settings');
+      if (saved) {
+        const p = JSON.parse(saved);
         set({
-          pushNotifications: parsed.pushNotifications ?? true,
-          emailNotifications: parsed.emailNotifications ?? true,
-          jobAlerts: parsed.jobAlerts ?? true,
-          darkMode: parsed.darkMode ?? false,
-          language: parsed.language ?? 'en',
-          biometricAuth: parsed.biometricAuth ?? false,
-          appVersion: parsed.appVersion ?? '1.0.0'
+          pushNotifications:  p.pushNotifications  ?? true,
+          emailNotifications: p.emailNotifications ?? true,
+          jobAlerts:          p.jobAlerts          ?? true,
+          darkMode:           p.darkMode           ?? false,
+          language:           p.language           ?? 'en',
+          biometricAuth:      p.biometricAuth      ?? false,
+          appVersion:         p.appVersion         ?? '1.0.0',
         });
         console.log('✅ Settings loaded from AsyncStorage');
       }
@@ -121,33 +150,36 @@ export const useSettings = create<SettingsState>((set, get) => ({
   },
 
   saveSettings: async (userId?: string) => {
+    const effectiveUserId = userId ?? get()._userId;
     try {
       const state = get();
-      const settingsToSave = {
-        pushNotifications: state.pushNotifications,
-        emailNotifications: state.emailNotifications,
-        jobAlerts: state.jobAlerts,
-        darkMode: state.darkMode,
-        language: state.language,
-        biometricAuth: state.biometricAuth,
-        appVersion: state.appVersion,
-        updatedAt: new Date()
+      const snapshot = {
+        user_id: effectiveUserId,
+        push_notifications:  state.pushNotifications,
+        email_notifications: state.emailNotifications,
+        job_alerts:          state.jobAlerts,
+        dark_mode:           state.darkMode,
+        language:           state.language,
+        biometric_auth:      state.biometricAuth,
+        app_version:         state.appVersion,
       };
 
-      // Save to Firebase (real-time sync)
-      if (userId) {
+      // Always save to AsyncStorage immediately
+      await AsyncStorage.setItem('app_settings', JSON.stringify(state));
+
+      // Save to Supabase if we have a userId
+      if (effectiveUserId) {
         try {
-          const settingsRef = doc(db, 'settings', userId);
-          await setDoc(settingsRef, settingsToSave, { merge: true });
-          console.log('✅ Settings saved to Firebase');
-        } catch (firebaseError) {
-          console.log('ℹ️ Could not save to Firebase, using local storage only');
+          const { error } = await supabase
+            .from('settings')
+            .upsert(snapshot);
+
+          if (error) throw error;
+          console.log('✅ Settings saved to Supabase');
+        } catch (err) {
+          console.log('ℹ️ Could not save to Supabase — saved locally only');
         }
       }
-
-      // Also save to AsyncStorage as backup
-      await AsyncStorage.setItem('app_settings', JSON.stringify(settingsToSave));
-      console.log('✅ Settings saved to AsyncStorage');
     } catch (error) {
       console.error('Error saving settings:', error);
     }
@@ -155,12 +187,10 @@ export const useSettings = create<SettingsState>((set, get) => ({
 
   clearCache: async () => {
     try {
-      // Clear only cache data, not user data
-      await AsyncStorage.removeItem('job_cache');
-      await AsyncStorage.removeItem('student_cache');
-      console.log('Cache cleared successfully');
+      await AsyncStorage.multiRemove(['job_cache', 'student_cache']);
+      console.log('✅ Cache cleared');
     } catch (error) {
       console.error('Error clearing cache:', error);
     }
-  }
+  },
 }));

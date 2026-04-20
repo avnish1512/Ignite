@@ -1,0 +1,90 @@
+-- ============================================================================
+-- IGNITE PORTAL - STORAGE BUCKETS & POLICIES
+-- ============================================================================
+-- Create storage buckets and set up security policies
+-- Note: Some of this is done via UI, some via SQL
+-- ============================================================================
+
+-- ============================================================================
+-- STORAGE BUCKET CREATION (Do this in Supabase UI)
+-- ============================================================================
+-- 
+-- Steps in Supabase:
+-- 1. Click "Storage" on left menu
+-- 2. Click "+ New Bucket"
+-- 3. Name it "profile-photos"
+--    - Make it PUBLIC (so users can see photos)
+--    - Click "Create bucket"
+-- 4. Repeat for "resumes"
+--    - Make it PUBLIC (so users can download resumes)
+--    - Click "Create bucket"
+--
+-- You should now have two buckets in Storage!
+
+-- ============================================================================
+-- STORAGE POLICIES (Set up via Supabase UI)
+-- ============================================================================
+-- 
+-- Storage policies must be created through the Supabase UI (not SQL).
+-- Follow the step-by-step instructions below in the UI SETUP section.
+
+-- ============================================================================
+-- WHAT THESE POLICIES DO
+-- ============================================================================
+--
+-- PROFILE-PHOTOS:
+-- - Anyone logged in can upload a photo (in their folder)
+-- - Anyone can see all photos (public)
+-- - Users can delete/update their own photos
+--
+-- RESUMES:
+-- - Anyone logged in can upload a resume
+-- - Anyone logged in can see/download resumes
+-- - Users can delete/update their own resumes
+-- - Admin can manage all resumes
+--
+-- This keeps data secure while allowing necessary access!
+--
+-- ============================================================================
+-- MANUAL SETUP IN SUPABASE UI (DETAILED STEPS)
+-- ============================================================================
+--
+-- PROFILE-PHOTOS BUCKET POLICIES:
+--
+-- 1. Go to Supabase Dashboard → Storage
+-- 2. Click the "profile-photos" bucket
+-- 3. Click "Policies" tab (or "Add Policy" button)
+-- 4. Create Policy 1 - Allow users to upload:
+--    - Click "+ New Policy" → "For authenticated users only" template
+--    - Target roles: authenticated
+--    - Allowed operations: SELECT, INSERT, UPDATE, DELETE
+--    - CUSTOM expressions (if needed):
+--      - FOR INSERT: bucket_id = 'profile-photos'
+--      - FOR SELECT: bucket_id = 'profile-photos'
+--      - FOR UPDATE: bucket_id = 'profile-photos'
+--      - FOR DELETE: bucket_id = 'profile-photos'
+--    - Click "Review" → "Save policy"
+--
+-- RESUMES BUCKET POLICIES:
+--
+-- 5. Click the "resumes" bucket
+-- 6. Click "Policies" tab
+-- 7. Create Policy 1 - For authenticated users:
+--    - Click "+ New Policy" → "For authenticated users only" template
+--    - Target roles: authenticated
+--    - Allowed operations: SELECT, INSERT, UPDATE, DELETE
+--    - CUSTOM expressions:
+--      - FOR INSERT: bucket_id = 'resumes'
+--      - FOR SELECT: bucket_id = 'resumes'
+--      - FOR UPDATE: bucket_id = 'resumes'
+--      - FOR DELETE: bucket_id = 'resumes'
+--    - Click "Review" → "Save policy"
+--
+-- 8. Create Policy 2 - For admin to manage all:
+--    - Click "+ New Policy" → "For authenticated users only" template
+--    - Target roles: authenticated
+--    - Allowed operations: SELECT, INSERT, UPDATE, DELETE
+--    - CUSTOM expression: (auth.jwt() ->> 'email') = 'admin@sgu.edu.in' AND bucket_id = 'resumes'
+--    - Click "Review" → "Save policy"
+--
+-- ============================================================================

@@ -2,8 +2,9 @@ import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Alert, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, router } from 'expo-router';
-import { ArrowLeft, Building2, DollarSign, Users, Calendar, Briefcase } from 'lucide-react-native';
+import { Building2, DollarSign, Users, Calendar, Briefcase, ArrowLeft } from 'lucide-react-native';
 import { useJobs } from '@/hooks/jobs-store';
+import { useNotifications } from '@/hooks/notifications-store';
 
 const { width: screenWidth } = Dimensions.get('window');
 const isTablet = screenWidth >= 768;
@@ -44,6 +45,7 @@ InputField.displayName = 'InputField';
 
 export default function AdminPostJob() {
   const { addJob, loadData } = useJobs();
+  const { triggerNewJobNotification } = useNotifications();
   const [formData, setFormData] = useState({
     companyName: '',
     position: '',
@@ -91,8 +93,9 @@ export default function AdminPostJob() {
       console.log('🚀 Submitting job form...');
       console.log('📝 Job data:', formData);
       
+      const jobId = `job_${Date.now()}`;
       const result = await addJob({
-        id: `job_${Date.now()}`,
+        id: jobId,
         title: formData.position,
         company: formData.companyName,
         location: formData.location,
@@ -137,6 +140,9 @@ export default function AdminPostJob() {
         console.log('📊 Refreshing jobs data...');
         await loadData();
         
+        // Push notification to all students
+        triggerNewJobNotification(formData.position, formData.companyName, jobId);
+        
         Alert.alert(
           'Success',
           'Job posted successfully!',
@@ -145,7 +151,7 @@ export default function AdminPostJob() {
       } else {
         console.error('❌ Job posting failed:', result.error);
         const errorMsg = result.error?.toLowerCase().includes('permission') 
-          ? `❌ Permission Denied\n\n${result.error}\n\n📌 FIX: Update Firebase Firestore Rules.\n\nSee PERMISSION_FIX.md in project root for step-by-step instructions.`
+          ? `❌ Permission Denied\n\n${result.error}\n\n📌 FIX: Ensure your Supabase RLS policies allow job creation.\n\nSee the Supabase dashboard for policy settings.`
           : result.error || 'Failed to post job';
         Alert.alert('Error', errorMsg);
       }

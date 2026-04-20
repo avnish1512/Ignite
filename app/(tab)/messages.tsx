@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   ScrollView,
+  FlatList,
   TouchableOpacity,
   TextInput,
   KeyboardAvoidingView,
@@ -11,29 +12,49 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Send, ArrowLeft, MessageSquare } from 'lucide-react-native';
+import { Send, ArrowLeft, MessageSquare, Users, Plus } from 'lucide-react-native';
+import { router } from 'expo-router';
 import { useAuth } from '@/hooks/auth-store';
-import { useMessaging } from '@/hooks/messaging-store';
+import { useMessaging, Conversation } from '@/hooks/messaging-store';
+import { useTheme } from '@/hooks/theme-store';
+import { capitalizeWords, getInitials } from '@/hooks/text-utils';
+import { MessageSkeleton } from '@/components/SkeletonLoader';
 import { DEFAULT_ADMIN_ID } from '@/constants/admin';
 
 const formatTime = (date: any): string => {
   if (!date) return '';
-  let d: Date;
-  if (typeof date?.toDate === 'function') d = date.toDate();
-  else if (date instanceof Date) d = date;
-  else if (typeof date?.seconds === 'number') d = new Date(date.seconds * 1000);
-  else d = new Date(date);
-  const diff = Date.now() - d.getTime();
-  if (isNaN(diff)) return '';
-  if (diff < 60000) return 'now';
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-  return d.toLocaleDateString();
+  const d = date?.toDate?.() ?? new Date(date);
+  if (isNaN(d.getTime())) return '';
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return 'Just now';
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 };
 
-function ChatView({ conversationId, onBack }: { conversationId: string; onBack: () => void }) {
+// ── Chat View Component ──────────────────────────────────────────
+function ChatView({
+  conversationId,
+  onBack,
+  chatTitle,
+  chatEmoji,
+  isPeer,
+  peerId,
+}: {
+  conversationId: string;
+  onBack: () => void;
+  chatTitle: string;
+  chatEmoji: string;
+  isPeer: boolean;
+  peerId?: string;
+}) {
+  const theme = useTheme();
+  const styles = React.useMemo(() => makeStyles(theme), [theme]);
   const { student } = useAuth();
-  const { conversations, sendMessageAsStudent, markMessagesAsRead } = useMessaging();
+  const { conversations, sendMessageAsStudent, sendPeerMessage, markMessagesAsRead } = useMessaging();
   const [messageText, setMessageText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
@@ -57,7 +78,18 @@ function ChatView({ conversationId, onBack }: { conversationId: string; onBack: 
     setMessageText('');
     setIsSending(true);
     try {
-      await sendMessageAsStudent(student.id, student.name || 'Student', text, DEFAULT_ADMIN_ID);
+      if (isPeer && peerId) {
+        // P2P message
+        await sendPeerMessage(conversationId, student.id, student.name || 'Student', peerId, text);
+        // Optional: notify peer (though notifications might be student-only right now)
+      } else {
+        // Admin message
+        await sendMessageAsStudent(student.id, student.name || 'Student', text, DEFAULT_ADMIN_ID);
+        // Note: Admin notifications might be handled differently, but let's be consistent
+      }
+      console.log('✅ Message handled in UI');
+    } catch (err) {
+      console.error('❌ Message send error in UI:', err);
     } finally {
       setIsSending(false);
     }
@@ -71,14 +103,23 @@ function ChatView({ conversationId, onBack }: { conversationId: string; onBack: 
       {/* Header */}
       <View style={styles.chatHeader}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
-          <ArrowLeft size={22} color="#1F2937" />
+          <ArrowLeft size={22} color={theme.text} />
         </TouchableOpacity>
-        <View style={styles.chatHeaderAvatar}>
-          <Text style={styles.chatHeaderAvatarText}>👨‍💼</Text>
+        <View style={[styles.chatHeaderAvatar, isPeer && { backgroundColor: getAvatarColor(chatTitle) }]}>
+          {isPeer ? (
+            <Text style={styles.chatHeaderInitials}>{getInitials(chatTitle)}</Text>
+          ) : (
+            <Text style={styles.chatHeaderAvatarText}>{chatEmoji}</Text>
+          )}
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={styles.chatHeaderTitle}>Placement Admin</Text>
-          <Text style={styles.chatHeaderSubtitle}>Ignite Placement Cell</Text>
+          <Text style={styles.chatHeaderTitle}>{capitalizeWords(chatTitle)}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 1, gap: 4 }}>
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: theme.success }} />
+            <Text style={{ fontSize: 11, color: theme.success, fontWeight: '600' }}>
+              {isPeer ? 'Student' : 'Admin'}
+            </Text>
+          </View>
         </View>
       </View>
 
@@ -91,22 +132,35 @@ function ChatView({ conversationId, onBack }: { conversationId: string; onBack: 
       >
         {messages.length === 0 ? (
           <View style={styles.emptyMessages}>
-            <MessageSquare size={40} color="#D1D5DB" />
+            <MessageSquare size={40} color={theme.textMuted} />
             <Text style={styles.emptyMessagesTitle}>No messages yet</Text>
-            <Text style={styles.emptyMessagesSubtitle}>Start a conversation with the admin</Text>
+            <Text style={styles.emptyMessagesSubtitle}>
+              {isPeer ? 'Start a conversation!' : 'Send a message to the admin'}
+            </Text>
           </View>
         ) : (
           messages.map((msg: any) => {
-            const isMe = msg.senderRole === 'student';
+            const isMe = msg.senderId === student?.id;
             return (
               <View key={msg.id} style={[styles.messageRow, isMe ? styles.myRow : styles.theirRow]}>
                 <View style={[styles.bubble, isMe ? styles.myBubble : styles.theirBubble]}>
+                  {/* Show sender name in peer chats for their messages */}
+                  {isPeer && !isMe && (
+                    <Text style={styles.senderLabel}>{capitalizeWords(msg.senderName)}</Text>
+                  )}
                   <Text style={[styles.bubbleText, isMe ? styles.myBubbleText : styles.theirBubbleText]}>
                     {msg.text}
                   </Text>
-                  <Text style={[styles.bubbleTime, isMe ? styles.myBubbleTime : styles.theirBubbleTime]}>
-                    {formatTime(msg.timestamp)}
-                  </Text>
+                  <View style={[styles.timeAndReadContainer, { justifyContent: isMe ? 'flex-end' : 'flex-start' }]}>
+                    <Text style={[styles.bubbleTime, isMe ? styles.myBubbleTime : styles.theirBubbleTime]}>
+                      {formatTime(msg.timestamp)}
+                    </Text>
+                    {isMe && (
+                      <Text style={[styles.readReceipt, msg.read ? styles.readReceiptRead : styles.readReceiptSent]}>
+                        {msg.read ? '✓✓' : '✓'}
+                      </Text>
+                    )}
+                  </View>
                 </View>
               </View>
             );
@@ -117,13 +171,13 @@ function ChatView({ conversationId, onBack }: { conversationId: string; onBack: 
       {/* Input */}
       <View style={styles.inputBar}>
         <TextInput
-          style={styles.textInput}
+          style={[styles.textInput, { maxHeight: 100 }]}
           placeholder="Type your message..."
-          placeholderTextColor="#9CA3AF"
+          placeholderTextColor={theme.textMuted}
           value={messageText}
           onChangeText={setMessageText}
           multiline
-          maxHeight={100}
+          returnKeyType="send"
           onSubmitEditing={handleSend}
         />
         <TouchableOpacity
@@ -141,203 +195,393 @@ function ChatView({ conversationId, onBack }: { conversationId: string; onBack: 
   );
 }
 
+// ── Avatar color helper ────────────────────────────────────────
+function getAvatarColor(name: string) {
+  const colors = [
+    '#6366F1', '#8B5CF6', '#EC4899', '#EF4444', '#F59E0B',
+    '#10B981', '#3B82F6', '#14B8A6', '#F97316', '#06B6D4',
+  ];
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+}
+
+// ── Main Messages Screen ─────────────────────────────────────────
 export default function MessagesScreen() {
+  const theme = useTheme();
+  const styles = React.useMemo(() => makeStyles(theme), [theme]);
   const { student } = useAuth();
-  const { conversations, getStudentConversation } = useMessaging();
-  const [conversationId, setConversationId] = useState<string | null>(null);
+  const { conversations, getStudentConversation, loadStudentConversations } = useMessaging();
+  const [activeConversation, setActiveConversation] = useState<{
+    id: string;
+    title: string;
+    emoji: string;
+    isPeer: boolean;
+    peerId?: string;
+  } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Load/create conversation on mount
+  // Load ALL conversations for this student (admin + peer)
   useEffect(() => {
     if (!student?.id) { setIsLoading(false); return; }
-    getStudentConversation(student.id)
-      .then(conv => { if (conv?.id) setConversationId(conv.id); })
-      .catch(err => console.error('Error loading conversation:', err))
+    
+    // First ensure admin conversation exists with CORRECT name
+    getStudentConversation(student.id, DEFAULT_ADMIN_ID, student.name)
+      .then(() => {
+        // Then load all conversations via real-time listener
+        return loadStudentConversations(student.id);
+      })
+      .catch(err => console.error('Error loading conversations:', err))
       .finally(() => setIsLoading(false));
-  }, [student?.id]);
+  }, [student?.id, student?.name]);
 
-  // Get the current conversation from live store
-  const conversation = conversationId
-    ? conversations.find(c => c.id === conversationId) ?? null
-    : null;
+  // Sort conversations: admin first, then by last message time
+  const sortedConversations = React.useMemo(() => {
+    if (!student?.id) return [];
+    return [...conversations].sort((a, b) => {
+      // Admin always first
+      const aIsAdmin = a.type !== 'peer';
+      const bIsAdmin = b.type !== 'peer';
+      if (aIsAdmin && !bIsAdmin) return -1;
+      if (!aIsAdmin && bIsAdmin) return 1;
+      // Then by time
+      const timeA = a.lastMessageTime instanceof Date ? a.lastMessageTime.getTime() : 0;
+      const timeB = b.lastMessageTime instanceof Date ? b.lastMessageTime.getTime() : 0;
+      return timeB - timeA;
+    });
+  }, [conversations, student?.id]);
 
   // ── Showing chat view ─────────────────────────────────────
-  if (conversationId) {
+  if (activeConversation) {
     return (
       <SafeAreaView style={styles.container}>
         <ChatView
-          conversationId={conversationId}
-          onBack={() => setConversationId(null)}
+          conversationId={activeConversation.id}
+          onBack={() => setActiveConversation(null)}
+          chatTitle={activeConversation.title}
+          chatEmoji={activeConversation.emoji}
+          isPeer={activeConversation.isPeer}
+          peerId={activeConversation.peerId}
         />
       </SafeAreaView>
     );
   }
+
+  // ── Helper: get display info for a conversation ─────────────
+  const getConvDisplay = (conv: Conversation) => {
+    const isPeer = conv.type === 'peer';
+    if (isPeer) {
+      // Find the other person's name
+      const otherName = conv.peerName || conv.adminName || 'Student';
+      return {
+        name: capitalizeWords(otherName),
+        emoji: '',
+        initials: getInitials(otherName),
+        color: getAvatarColor(otherName),
+        subtitle: 'Student',
+        isPeer: true,
+        peerId: conv.peerId || conv.adminId,
+      };
+    }
+    return {
+      name: 'Placement Admin',
+      emoji: '👨‍💼',
+      initials: '',
+      color: '',
+      subtitle: 'Admin',
+      isPeer: false,
+      peerId: undefined,
+    };
+  };
 
   // ── Conversation list / loading ───────────────────────────
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Messages</Text>
+        <TouchableOpacity
+          style={styles.directoryBtn}
+          onPress={() => router.push('/student-directory' as any)}
+        >
+          <Users size={18} color={theme.primary} />
+          <Text style={styles.directoryBtnText}>Students</Text>
+        </TouchableOpacity>
       </View>
 
       {isLoading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color="#6366F1" />
-          <Text style={styles.loadingText}>Loading...</Text>
-        </View>
+        <MessageSkeleton />
       ) : !student ? (
         <View style={styles.centered}>
           <Text style={styles.emptyTitle}>Please log in</Text>
         </View>
-      ) : conversation ? (
-        <TouchableOpacity
-          style={styles.convItem}
-          onPress={() => setConversationId(conversation.id)}
-          activeOpacity={0.7}
-        >
-          <View style={styles.convAvatar}>
-            <Text style={styles.convAvatarText}>👨‍💼</Text>
-            <View style={styles.onlineDot} />
-          </View>
-          <View style={styles.convBody}>
-            <View style={styles.convHeader}>
-              <Text style={styles.convName}>{conversation.adminName || 'Admin'}</Text>
-              <Text style={styles.convTime}>{formatTime(conversation.lastMessageTime)}</Text>
-            </View>
-            <View style={styles.convFooter}>
-              <Text style={styles.convLastMsg} numberOfLines={1}>
-                {conversation.lastMessage || 'Start a conversation'}
-              </Text>
-              {(conversation.unreadCount ?? 0) > 0 && (
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>{conversation.unreadCount}</Text>
+      ) : sortedConversations.length > 0 ? (
+        <FlatList
+          data={sortedConversations}
+          keyExtractor={item => item.id}
+          showsVerticalScrollIndicator={false}
+          renderItem={({ item: conv }) => {
+            const display = getConvDisplay(conv);
+            const unreadCount = conv.messages?.filter(
+              (m: any) => !m.read && m.senderId !== student.id
+            ).length || 0;
+
+            return (
+              <TouchableOpacity
+                style={styles.convItem}
+                onPress={() => setActiveConversation({
+                  id: conv.id,
+                  title: display.isPeer ? (conv.peerName || conv.adminName) : 'Placement Admin',
+                  emoji: display.emoji,
+                  isPeer: display.isPeer,
+                  peerId: display.peerId,
+                })}
+                activeOpacity={0.7}
+              >
+                <View style={styles.convAvatar}>
+                  {display.isPeer ? (
+                    <View style={[styles.peerAvatarCircle, { backgroundColor: display.color }]}>
+                      <Text style={styles.peerAvatarInitials}>{display.initials}</Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.convAvatarText}>👨‍💼</Text>
+                  )}
+                  <View style={[
+                    styles.onlineDot,
+                    !display.isPeer && { backgroundColor: theme.success },
+                    display.isPeer && { backgroundColor: theme.textMuted },
+                  ]} />
                 </View>
-              )}
-            </View>
-          </View>
-        </TouchableOpacity>
+                <View style={styles.convBody}>
+                  <View style={styles.convHeader}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                      <Text style={styles.convName} numberOfLines={1}>{display.name}</Text>
+                      {!display.isPeer && (
+                        <View style={styles.adminTag}>
+                          <Text style={styles.adminTagText}>ADMIN</Text>
+                        </View>
+                      )}
+                      {display.isPeer && (
+                        <View style={styles.peerTag}>
+                          <Text style={styles.peerTagText}>PEER</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.convTime}>{formatTime(conv.lastMessageTime)}</Text>
+                  </View>
+                  <View style={styles.convFooter}>
+                    <Text style={styles.convLastMsg} numberOfLines={1}>
+                      {conv.lastMessage || 'Start a conversation'}
+                    </Text>
+                    {unreadCount > 0 && (
+                      <View style={styles.badge}>
+                        <Text style={styles.badgeText}>{unreadCount}</Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+              </TouchableOpacity>
+            );
+          }}
+        />
       ) : (
         <View style={styles.centered}>
-          <MessageSquare size={52} color="#D1D5DB" />
+          <MessageSquare size={52} color={theme.textMuted} />
           <Text style={styles.emptyTitle}>No conversations yet</Text>
           <Text style={styles.emptySubtitle}>
-            Tap the button below to message the admin
+            Message the admin or find students to chat with
           </Text>
-          <TouchableOpacity
-            style={styles.startBtn}
-            onPress={async () => {
-              if (!student) return;
-              setIsLoading(true);
-              const conv = await getStudentConversation(student.id);
-              if (conv?.id) setConversationId(conv.id);
-              setIsLoading(false);
-            }}
-          >
-            <Text style={styles.startBtnText}>Message Admin</Text>
-          </TouchableOpacity>
+          <View style={styles.emptyActions}>
+            <TouchableOpacity
+              style={styles.startBtn}
+              onPress={async () => {
+                if (!student) return;
+                setIsLoading(true);
+                const conv = await getStudentConversation(student.id, DEFAULT_ADMIN_ID, student.name);
+                if (conv?.id) {
+                  setActiveConversation({
+                    id: conv.id,
+                    title: 'Placement Admin',
+                    emoji: '👨‍💼',
+                    isPeer: false,
+                  });
+                }
+                setIsLoading(false);
+              }}
+            >
+              <Text style={styles.startBtnText}>Message Admin</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.startBtn, styles.secondaryBtn]}
+              onPress={() => router.push('/student-directory' as any)}
+            >
+              <Users size={16} color={theme.primary} />
+              <Text style={[styles.startBtnText, { color: theme.primary }]}>Find Students</Text>
+            </TouchableOpacity>
+          </View>
         </View>
+      )}
+
+      {/* FAB — New conversation */}
+      {sortedConversations.length > 0 && (
+        <TouchableOpacity
+          style={[styles.fab, { backgroundColor: theme.primary }]}
+          onPress={() => router.push('/student-directory' as any)}
+          activeOpacity={0.8}
+        >
+          <Plus size={24} color="#FFFFFF" />
+        </TouchableOpacity>
       )}
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F9FAFB' },
-  header: {
-    flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14,
-    backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#F3F4F6',
-  },
-  headerTitle: { fontSize: 22, fontWeight: '800', color: '#111827' },
+function makeStyles(theme: ReturnType<typeof useTheme>) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: theme.background },
+    header: {
+      flexDirection: 'row', justifyContent: 'space-between',
+      alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14,
+      backgroundColor: theme.surface, borderBottomWidth: 1, borderBottomColor: theme.border,
+    },
+    headerTitle: { fontSize: 22, fontWeight: '800', color: theme.text },
+    directoryBtn: {
+      flexDirection: 'row', alignItems: 'center', gap: 5,
+      backgroundColor: theme.primaryLight, paddingHorizontal: 12,
+      paddingVertical: 6, borderRadius: 20,
+    },
+    directoryBtnText: {
+      fontSize: 13, fontWeight: '600', color: theme.primary,
+    },
 
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
-  loadingText: { marginTop: 10, color: '#9CA3AF', fontSize: 14 },
-  emptyTitle: { fontSize: 17, fontWeight: '700', color: '#374151', marginTop: 14, textAlign: 'center' },
-  emptySubtitle: { fontSize: 13, color: '#9CA3AF', textAlign: 'center', marginTop: 6, lineHeight: 20 },
-  startBtn: {
-    marginTop: 20, backgroundColor: '#6366F1',
-    paddingHorizontal: 24, paddingVertical: 12, borderRadius: 10,
-  },
-  startBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
+    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
+    loadingText: { marginTop: 10, color: theme.textMuted, fontSize: 14 },
+    emptyTitle: { fontSize: 17, fontWeight: '700', color: theme.text, marginTop: 14, textAlign: 'center' },
+    emptySubtitle: { fontSize: 13, color: theme.textMuted, textAlign: 'center', marginTop: 6, lineHeight: 20 },
+    emptyActions: { marginTop: 20, gap: 10, alignItems: 'center' },
+    startBtn: {
+      flexDirection: 'row', alignItems: 'center', gap: 6,
+      backgroundColor: theme.primary,
+      paddingHorizontal: 24, paddingVertical: 12, borderRadius: 10,
+    },
+    startBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
+    secondaryBtn: {
+      backgroundColor: theme.primaryLight,
+      borderWidth: 1, borderColor: theme.primary,
+    },
 
-  // Conversation list item
-  convItem: {
-    flexDirection: 'row', alignItems: 'center', padding: 16,
-    backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#F3F4F6',
-  },
-  convAvatar: { position: 'relative', marginRight: 12 },
-  convAvatarText: {
-    width: 50, height: 50, borderRadius: 25, backgroundColor: '#EEF2FF',
-    fontSize: 26, textAlign: 'center', lineHeight: 50,
-  },
-  onlineDot: {
-    position: 'absolute', bottom: 1, right: 1,
-    width: 12, height: 12, borderRadius: 6,
-    backgroundColor: '#10B981', borderWidth: 2, borderColor: '#FFFFFF',
-  },
-  convBody: { flex: 1 },
-  convHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
-  convName: { fontSize: 15, fontWeight: '700', color: '#111827' },
-  convTime: { fontSize: 12, color: '#9CA3AF' },
-  convFooter: { flexDirection: 'row', alignItems: 'center' },
-  convLastMsg: { fontSize: 13, color: '#6B7280', flex: 1, marginRight: 6 },
-  badge: {
-    backgroundColor: '#6366F1', borderRadius: 10,
-    minWidth: 20, height: 20, justifyContent: 'center',
-    alignItems: 'center', paddingHorizontal: 5,
-  },
-  badgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+    // Conversation list item
+    convItem: {
+      flexDirection: 'row', alignItems: 'center', padding: 16,
+      backgroundColor: theme.surface, borderBottomWidth: 1, borderBottomColor: theme.border,
+    },
+    convAvatar: { position: 'relative', marginRight: 12 },
+    convAvatarText: {
+      width: 50, height: 50, borderRadius: 25, backgroundColor: theme.primaryLight,
+      fontSize: 26, textAlign: 'center', lineHeight: 50,
+    },
+    peerAvatarCircle: {
+      width: 50, height: 50, borderRadius: 25,
+      alignItems: 'center', justifyContent: 'center',
+    },
+    peerAvatarInitials: {
+      color: '#FFFFFF', fontSize: 18, fontWeight: '700',
+    },
+    onlineDot: {
+      position: 'absolute', bottom: 1, right: 1,
+      width: 12, height: 12, borderRadius: 6,
+      backgroundColor: theme.success, borderWidth: 2, borderColor: theme.surface,
+    },
+    convBody: { flex: 1 },
+    convHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
+    convName: { fontSize: 15, fontWeight: '700', color: theme.text, flexShrink: 1 },
+    adminTag: {
+      backgroundColor: '#DBEAFE', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4,
+    },
+    adminTagText: { fontSize: 9, fontWeight: '800', color: '#3B82F6', letterSpacing: 0.5 },
+    peerTag: {
+      backgroundColor: '#E0E7FF', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4,
+    },
+    peerTagText: { fontSize: 9, fontWeight: '800', color: '#6366F1', letterSpacing: 0.5 },
+    convTime: { fontSize: 12, color: theme.textMuted },
+    convFooter: { flexDirection: 'row', alignItems: 'center' },
+    convLastMsg: { fontSize: 13, color: theme.textSecondary, flex: 1, marginRight: 6 },
+    badge: {
+      backgroundColor: theme.primary, borderRadius: 10,
+      minWidth: 20, height: 20, justifyContent: 'center',
+      alignItems: 'center', paddingHorizontal: 5,
+    },
+    badgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
 
-  // Chat view
-  chatContainer: { flex: 1, backgroundColor: '#F9FAFB' },
-  chatHeader: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: 14, paddingVertical: 12,
-    backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#F3F4F6',
-  },
-  backButton: { padding: 4 },
-  chatHeaderAvatar: {
-    width: 38, height: 38, borderRadius: 19,
-    backgroundColor: '#EEF2FF', alignItems: 'center', justifyContent: 'center',
-  },
-  chatHeaderAvatarText: { fontSize: 20 },
-  chatHeaderTitle: { fontSize: 15, fontWeight: '700', color: '#1F2937' },
-  chatHeaderSubtitle: { fontSize: 11, color: '#9CA3AF', marginTop: 1 },
+    // FAB
+    fab: {
+      position: 'absolute', bottom: 20, right: 20,
+      width: 56, height: 56, borderRadius: 28,
+      alignItems: 'center', justifyContent: 'center',
+      shadowColor: '#6366F1', shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.3, shadowRadius: 8, elevation: 6,
+    },
 
-  messagesContainer: { flex: 1, paddingHorizontal: 14 },
-  emptyMessages: { flex: 1, alignItems: 'center', paddingTop: 80 },
-  emptyMessagesTitle: { fontSize: 16, fontWeight: '700', color: '#9CA3AF', marginTop: 14 },
-  emptyMessagesSubtitle: { fontSize: 13, color: '#C4C4C4', marginTop: 6 },
+    // Chat view
+    chatContainer: { flex: 1, backgroundColor: theme.background },
+    chatHeader: {
+      flexDirection: 'row', alignItems: 'center', gap: 10,
+      paddingHorizontal: 14, paddingVertical: 12,
+      backgroundColor: theme.surface, borderBottomWidth: 1, borderBottomColor: theme.border,
+    },
+    backButton: { padding: 4 },
+    chatHeaderAvatar: {
+      width: 38, height: 38, borderRadius: 19,
+      backgroundColor: theme.primaryLight, alignItems: 'center', justifyContent: 'center',
+    },
+    chatHeaderAvatarText: { fontSize: 20 },
+    chatHeaderInitials: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+    chatHeaderTitle: { fontSize: 15, fontWeight: '700', color: theme.text },
+    chatHeaderSubtitle: { fontSize: 11, color: theme.textMuted, marginTop: 1 },
 
-  messageRow: { marginVertical: 3, flexDirection: 'row' },
-  myRow: { justifyContent: 'flex-end' },
-  theirRow: { justifyContent: 'flex-start' },
-  bubble: {
-    maxWidth: '78%', paddingHorizontal: 14,
-    paddingTop: 8, paddingBottom: 6, borderRadius: 16,
-  },
-  myBubble: { backgroundColor: '#6366F1', borderBottomRightRadius: 4 },
-  theirBubble: { backgroundColor: '#FFFFFF', borderBottomLeftRadius: 4, borderWidth: 1, borderColor: '#E5E7EB' },
-  bubbleText: { fontSize: 15, lineHeight: 20 },
-  myBubbleText: { color: '#FFFFFF' },
-  theirBubbleText: { color: '#1F2937' },
-  bubbleTime: { fontSize: 10, marginTop: 3 },
-  myBubbleTime: { color: '#C7D2FE', textAlign: 'right' },
-  theirBubbleTime: { color: '#9CA3AF' },
+    messagesContainer: { flex: 1, paddingHorizontal: 14 },
+    emptyMessages: { flex: 1, alignItems: 'center', paddingTop: 80 },
+    emptyMessagesTitle: { fontSize: 16, fontWeight: '700', color: theme.textMuted, marginTop: 14 },
+    emptyMessagesSubtitle: { fontSize: 13, color: theme.textMuted, marginTop: 6 },
 
-  inputBar: {
-    flexDirection: 'row', alignItems: 'flex-end', gap: 8,
-    paddingHorizontal: 14, paddingVertical: 10,
-    backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: '#F3F4F6',
-  },
-  textInput: {
-    flex: 1, backgroundColor: '#F3F4F6', borderRadius: 20,
-    paddingHorizontal: 16, paddingVertical: 10,
-    fontSize: 14, color: '#1F2937', maxHeight: 100,
-  },
-  sendBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: '#6366F1', alignItems: 'center', justifyContent: 'center',
-  },
-  sendBtnDisabled: { backgroundColor: '#D1D5DB' },
-});
+    senderLabel: {
+      fontSize: 11, fontWeight: '700', color: theme.primary, marginBottom: 3,
+    },
+    messageRow: { marginVertical: 3, flexDirection: 'row' },
+    myRow: { justifyContent: 'flex-end' },
+    theirRow: { justifyContent: 'flex-start' },
+    bubble: {
+      maxWidth: '78%', paddingHorizontal: 14,
+      paddingTop: 8, paddingBottom: 6, borderRadius: 16,
+    },
+    myBubble: { backgroundColor: theme.primary, borderBottomRightRadius: 4 },
+    theirBubble: { backgroundColor: theme.surface, borderBottomLeftRadius: 4, borderWidth: 1, borderColor: theme.borderStrong },
+    bubbleText: { fontSize: 15, lineHeight: 20 },
+    myBubbleText: { color: '#FFFFFF' },
+    theirBubbleText: { color: theme.text },
+    timeAndReadContainer: { flexDirection: 'row', alignItems: 'center', marginTop: 3, gap: 4 },
+    bubbleTime: { fontSize: 10 },
+    myBubbleTime: { color: 'rgba(255, 255, 255, 0.7)', textAlign: 'right' },
+    theirBubbleTime: { color: theme.textMuted },
+    readReceipt: { fontSize: 10, alignSelf: 'flex-end' },
+    readReceiptSent: { color: 'rgba(255, 255, 255, 0.7)' },
+    readReceiptRead: { color: '#60A5FA', fontWeight: 'bold' },
+
+    inputBar: {
+      flexDirection: 'row', alignItems: 'flex-end', gap: 8,
+      paddingHorizontal: 14, paddingVertical: 10,
+      backgroundColor: theme.surface, borderTopWidth: 1, borderTopColor: theme.border,
+    },
+    textInput: {
+      flex: 1, backgroundColor: theme.surfaceAlt, borderRadius: 20,
+      paddingHorizontal: 16, paddingVertical: 10,
+      fontSize: 14, color: theme.text, maxHeight: 100,
+    },
+    sendBtn: {
+      width: 40, height: 40, borderRadius: 20,
+      backgroundColor: theme.primary, alignItems: 'center', justifyContent: 'center',
+    },
+    sendBtnDisabled: { backgroundColor: theme.borderStrong },
+  });
+}

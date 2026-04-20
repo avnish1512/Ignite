@@ -1,18 +1,22 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, FlatList, ScrollView, TouchableOpacity, TextInput, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import { Search, Filter } from 'lucide-react-native';
 import { useJobs } from '@/hooks/jobs-store';
 import { useAuth } from '@/hooks/auth-store';
+import { useTheme } from '@/hooks/theme-store';
 import JobCard from '@/components/JobCard';
+import { JobCardSkeleton } from '@/components/SkeletonLoader';
 import { Job } from '@/types/job';
 
 export default function JobsScreen() {
+  const theme = useTheme();
   const { jobs, isLoading, getApplicationsForStudent, loadData } = useJobs();
   const { student } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTab, setSelectedTab] = useState<'opportunities' | 'applications' | 'offers'>('opportunities');
+  const styles = React.useMemo(() => makeStyles(theme), [theme]);
 
   // Refresh jobs whenever this screen comes into focus
   useFocusEffect(
@@ -63,9 +67,14 @@ export default function JobsScreen() {
   if (isLoading) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Loading opportunities...</Text>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Jobs</Text>
         </View>
+        <ScrollView showsVerticalScrollIndicator={false}>
+          <JobCardSkeleton />
+          <JobCardSkeleton />
+          <JobCardSkeleton />
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -76,20 +85,20 @@ export default function JobsScreen() {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Jobs</Text>
         <TouchableOpacity style={styles.filterButton}>
-          <Filter size={24} color="#6B7280" />
+          <Filter size={24} color={theme.textSecondary} />
         </TouchableOpacity>
       </View>
 
       {/* Search Bar */}
       <View style={styles.searchContainer}>
         <View style={styles.searchBar}>
-          <Search size={20} color="#9CA3AF" />
+          <Search size={20} color={theme.textMuted} />
           <TextInput
             style={styles.searchInput}
             placeholder="Search jobs, companies, locations..."
             value={searchQuery}
             onChangeText={setSearchQuery}
-            placeholderTextColor="#9CA3AF"
+            placeholderTextColor={theme.textMuted}
           />
         </View>
       </View>
@@ -148,102 +157,104 @@ const { width: screenWidth } = Dimensions.get('window');
 const isTablet = screenWidth >= 768;
 const isSmallScreen = screenWidth < 375;
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F9FAFB',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    fontSize: 16,
-    color: '#6B7280',
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: isTablet ? 24 : 16,
-    paddingVertical: isTablet ? 16 : 12,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-  },
-  headerTitle: {
-    fontSize: isTablet ? 32 : isSmallScreen ? 20 : 24,
-    fontWeight: 'bold',
-    color: '#111827',
-  },
-  filterButton: {
-    padding: 8,
-  },
-  searchContainer: {
-    padding: isTablet ? 24 : 16,
-    backgroundColor: '#FFFFFF',
-  },
-  searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F9FAFB',
-    borderRadius: isTablet ? 16 : 12,
-    paddingHorizontal: isTablet ? 20 : 16,
-    paddingVertical: isTablet ? 16 : 12,
-    gap: isTablet ? 16 : 12,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: isTablet ? 18 : isSmallScreen ? 14 : 16,
-    color: '#111827',
-  },
-  tabsContainer: {
-    flexDirection: 'row',
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: isTablet ? 24 : 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-    flexWrap: isSmallScreen ? 'wrap' : 'nowrap',
-  },
-  tab: {
-    paddingVertical: isTablet ? 20 : 16,
-    paddingHorizontal: isTablet ? 12 : 8,
-    marginRight: isTablet ? 32 : isSmallScreen ? 16 : 24,
-    marginBottom: isSmallScreen ? 8 : 0,
-  },
-  activeTab: {
-    borderBottomWidth: 2,
-    borderBottomColor: '#6366F1',
-  },
-  tabText: {
-    fontSize: isTablet ? 18 : isSmallScreen ? 14 : 16,
-    color: '#6B7280',
-    fontWeight: '500',
-  },
-  activeTabText: {
-    color: '#6366F1',
-    fontWeight: '600',
-  },
-  listContainer: {
-    paddingVertical: isTablet ? 12 : 8,
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: isTablet ? 80 : 64,
-  },
-  emptyText: {
-    fontSize: isTablet ? 24 : isSmallScreen ? 16 : 18,
-    fontWeight: '600',
-    color: '#111827',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  emptySubtext: {
-    fontSize: isTablet ? 16 : isSmallScreen ? 12 : 14,
-    color: '#6B7280',
-    textAlign: 'center',
-  },
-});
+function makeStyles(theme: ReturnType<typeof useTheme>) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: theme.background,
+    },
+    loadingContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    loadingText: {
+      fontSize: 16,
+      color: theme.textSecondary,
+    },
+    header: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: isTablet ? 24 : 16,
+      paddingVertical: isTablet ? 16 : 12,
+      backgroundColor: theme.surface,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.border,
+    },
+    headerTitle: {
+      fontSize: isTablet ? 32 : isSmallScreen ? 20 : 24,
+      fontWeight: 'bold',
+      color: theme.text,
+    },
+    filterButton: {
+      padding: 8,
+    },
+    searchContainer: {
+      padding: isTablet ? 24 : 16,
+      backgroundColor: theme.surface,
+    },
+    searchBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: theme.surfaceAlt,
+      borderRadius: isTablet ? 16 : 12,
+      paddingHorizontal: isTablet ? 20 : 16,
+      paddingVertical: isTablet ? 16 : 12,
+      gap: isTablet ? 16 : 12,
+    },
+    searchInput: {
+      flex: 1,
+      fontSize: isTablet ? 18 : isSmallScreen ? 14 : 16,
+      color: theme.text,
+    },
+    tabsContainer: {
+      flexDirection: 'row',
+      backgroundColor: theme.surface,
+      paddingHorizontal: isTablet ? 24 : 16,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.border,
+      flexWrap: isSmallScreen ? 'wrap' : 'nowrap',
+    },
+    tab: {
+      paddingVertical: isTablet ? 20 : 16,
+      paddingHorizontal: isTablet ? 12 : 8,
+      marginRight: isTablet ? 32 : isSmallScreen ? 16 : 24,
+      marginBottom: isSmallScreen ? 8 : 0,
+    },
+    activeTab: {
+      borderBottomWidth: 2,
+      borderBottomColor: theme.primary,
+    },
+    tabText: {
+      fontSize: isTablet ? 18 : isSmallScreen ? 14 : 16,
+      color: theme.textSecondary,
+      fontWeight: '500',
+    },
+    activeTabText: {
+      color: theme.primary,
+      fontWeight: '600',
+    },
+    listContainer: {
+      paddingVertical: isTablet ? 12 : 8,
+    },
+    emptyContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingVertical: isTablet ? 80 : 64,
+    },
+    emptyText: {
+      fontSize: isTablet ? 24 : isSmallScreen ? 16 : 18,
+      fontWeight: '600',
+      color: theme.text,
+      marginBottom: 8,
+      textAlign: 'center',
+    },
+    emptySubtext: {
+      fontSize: isTablet ? 16 : isSmallScreen ? 12 : 14,
+      color: theme.textSecondary,
+      textAlign: 'center',
+    },
+  });
+}

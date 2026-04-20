@@ -33,7 +33,7 @@ export interface Application {
   studentCourse?: string;
   studentYear?: string;
   studentResume?: string;
-  status: 'Applied' | 'Under Review' | 'Shortlisted' | 'Rejected' | 'Selected';
+  status: 'Applied' | 'Under Review' | 'Shortlisted' | 'Interviewing' | 'Rejected' | 'Selected';
   appliedDate: string;
   adminNotes?: string;
   lastUpdated?: string;
@@ -67,11 +67,13 @@ export interface Company {
   id: string;
   name: string;
   industry: string;
-  location: string;
+  location?: string;
   website?: string;
+  logo?: string;
   contactEmail?: string;
   contactPhone?: string;
   description?: string;
   addedDate: string;
-  isActive: boolean;
+  addedBy?: string;
+  isActive?: boolean;
 }

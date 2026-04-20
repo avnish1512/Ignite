@@ -5,6 +5,7 @@ import { Stack } from 'expo-router';
 import { Bell, Briefcase, Calendar, Users, CheckCircle, X, Settings, Trash2 } from 'lucide-react-native';
 import { useAuth } from '@/hooks/auth-store';
 import { useNotifications } from '@/hooks/notifications-store';
+import { useTheme } from '@/hooks/theme-store';
 
 type Notification = {
   id: string;
@@ -20,6 +21,8 @@ export default function NotificationsScreen() {
   const { student } = useAuth();
   const { notifications, unreadCount, markAsRead, markAllAsRead, deleteNotification, initializeNotifications, clearReadNotifications } = useNotifications();
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
+  const theme = useTheme();
+  const styles = React.useMemo(() => makeStyles(theme), [theme]);
 
   // Initialize notifications when student logs in
   useEffect(() => {
@@ -55,11 +58,11 @@ export default function NotificationsScreen() {
 
   const getIconColor = (type: string) => {
     switch (type) {
-      case 'job': return '#6366F1';
-      case 'application': return '#10B981';
-      case 'announcement': return '#F59E0B';
-      case 'reminder': return '#EF4444';
-      default: return '#6B7280';
+      case 'job': return theme.primary;
+      case 'application': return theme.success;
+      case 'announcement': return '#F59E0B'; // Amber
+      case 'reminder': return '#EF4444'; // Red
+      default: return theme.textMuted;
     }
   };
 
@@ -97,7 +100,7 @@ export default function NotificationsScreen() {
               onPress={() => markAllAsRead(student.id)} 
               style={styles.headerButton}
             >
-              <Settings size={20} color="#6366F1" />
+              <Settings size={20} color={theme.primary} />
             </TouchableOpacity>
           )
         }} 
@@ -165,7 +168,7 @@ export default function NotificationsScreen() {
       <ScrollView showsVerticalScrollIndicator={false}>
         {filteredNotifications.length === 0 ? (
           <View style={styles.emptyState}>
-            <Bell size={48} color="#9CA3AF" />
+            <Bell size={48} color={theme.textMuted} />
             <Text style={styles.emptyTitle}>
               {filter === 'unread' ? 'No Unread Notifications' : 'No Notifications'}
             </Text>
@@ -208,7 +211,7 @@ export default function NotificationsScreen() {
                     style={styles.deleteButton}
                     onPress={() => deleteNotification(notification.id)}
                   >
-                    <X size={16} color="#9CA3AF" />
+                    <X size={16} color={theme.textMuted} />
                   </TouchableOpacity>
                 </TouchableOpacity>
               );
@@ -220,172 +223,176 @@ export default function NotificationsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F9FAFB',
-  },
-  headerButton: {
-    padding: 8,
-  },
-  header: {
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-  },
-  headerTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#111827',
-  },
-  markAllButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-    backgroundColor: '#F3F4F6',
-  },
-  markAllText: {
-    fontSize: 12,
-    color: '#6366F1',
-    fontWeight: '500',
-  },
-  headerActions: {
-    flexDirection: 'row',
-    gap: 12,
-    alignItems: 'center',
-  },
-  clearButton: {
-    flexDirection: 'row',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-    backgroundColor: '#FEE2E2',
-    alignItems: 'center',
-    gap: 6,
-  },
-  clearButtonText: {
-    fontSize: 12,
-    color: '#EF4444',
-    fontWeight: '500',
-  },
-  filterTabs: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  filterTab: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: '#F3F4F6',
-  },
-  activeFilterTab: {
-    backgroundColor: '#6366F1',
-  },
-  filterTabText: {
-    fontSize: 14,
-    color: '#6B7280',
-    fontWeight: '500',
-  },
-  activeFilterTabText: {
-    color: '#FFFFFF',
-  },
-  emptyState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 32,
-    marginTop: 100,
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#111827',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  emptySubtitle: {
-    fontSize: 14,
-    color: '#6B7280',
-    textAlign: 'center',
-  },
-  notificationsList: {
-    padding: 16,
-  },
-  notificationCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 8,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  unreadCard: {
-    borderLeftWidth: 3,
-    borderLeftColor: '#6366F1',
-  },
-  notificationContent: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  notificationIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  notificationText: {
-    flex: 1,
-  },
-  notificationHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  notificationTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#111827',
-    flex: 1,
-  },
-  unreadTitle: {
-    fontWeight: 'bold',
-  },
-  unreadDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#6366F1',
-    marginLeft: 8,
-  },
-  notificationMessage: {
-    fontSize: 14,
-    color: '#6B7280',
-    lineHeight: 20,
-    marginBottom: 8,
-  },
-  notificationTime: {
-    fontSize: 12,
-    color: '#9CA3AF',
-  },
-  deleteButton: {
-    padding: 4,
-    marginLeft: 8,
-  },
-});
+function makeStyles(theme: ReturnType<typeof useTheme>) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: theme.background,
+    },
+    headerButton: {
+      padding: 8,
+    },
+    header: {
+      backgroundColor: theme.surface,
+      paddingHorizontal: 16,
+      paddingTop: 16,
+      paddingBottom: 8,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.border,
+    },
+    headerTop: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 16,
+    },
+    title: {
+      fontSize: 24,
+      fontWeight: 'bold',
+      color: theme.text,
+    },
+    markAllButton: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 6,
+      backgroundColor: theme.surfaceAlt,
+    },
+    markAllText: {
+      fontSize: 12,
+      color: theme.primary,
+      fontWeight: '500',
+    },
+    headerActions: {
+      flexDirection: 'row',
+      gap: 12,
+      alignItems: 'center',
+    },
+    clearButton: {
+      flexDirection: 'row',
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 6,
+      backgroundColor: '#FEE2E2', // specific red surface
+      alignItems: 'center',
+      gap: 6,
+    },
+    clearButtonText: {
+      fontSize: 12,
+      color: '#EF4444',
+      fontWeight: '500',
+    },
+    filterTabs: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    filterTab: {
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderRadius: 20,
+      backgroundColor: theme.surfaceAlt,
+    },
+    activeFilterTab: {
+      backgroundColor: theme.primary,
+    },
+    filterTabText: {
+      fontSize: 14,
+      color: theme.textMuted,
+      fontWeight: '500',
+    },
+    activeFilterTabText: {
+      color: '#FFFFFF',
+    },
+    emptyState: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 32,
+      marginTop: 100,
+    },
+    emptyTitle: {
+      fontSize: 18,
+      fontWeight: '600',
+      color: theme.text,
+      marginTop: 16,
+      marginBottom: 8,
+    },
+    emptySubtitle: {
+      fontSize: 14,
+      color: theme.textMuted,
+      textAlign: 'center',
+    },
+    notificationsList: {
+      padding: 16,
+    },
+    notificationCard: {
+      backgroundColor: theme.surface,
+      borderRadius: 12,
+      padding: 16,
+      marginBottom: 8,
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: theme.isDark ? 0.3 : 0.05,
+      shadowRadius: 2,
+      elevation: 1,
+      borderWidth: theme.isDark ? 1 : 0,
+      borderColor: theme.border,
+    },
+    unreadCard: {
+      borderLeftWidth: 3,
+      borderLeftColor: theme.primary,
+    },
+    notificationContent: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+    },
+    notificationIcon: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginRight: 12,
+    },
+    notificationText: {
+      flex: 1,
+    },
+    notificationHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 4,
+    },
+    notificationTitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: theme.text,
+      flex: 1,
+    },
+    unreadTitle: {
+      fontWeight: 'bold',
+    },
+    unreadDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      backgroundColor: theme.primary,
+      marginLeft: 8,
+    },
+    notificationMessage: {
+      fontSize: 14,
+      color: theme.textMuted,
+      lineHeight: 20,
+      marginBottom: 8,
+    },
+    notificationTime: {
+      fontSize: 12,
+      color: theme.textMuted,
+    },
+    deleteButton: {
+      padding: 4,
+      marginLeft: 8,
+    },
+  });
+}

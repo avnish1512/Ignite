@@ -4,17 +4,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { Alert } from 'react-native';
 
 import { Student } from '@/types/job';
-import { auth, db } from '@/config/firebase';
+import { supabase } from '@/config/supabase';
 import { DEFAULT_ADMIN_ID } from '@/constants/admin';
-import {
-  signInWithEmailAndPassword,
-  signOut,
-  onAuthStateChanged,
-  User as FirebaseUser,
-  createUserWithEmailAndPassword,
-  updateProfile,
-} from 'firebase/auth';
-import { doc, getDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
 
 type Admin = {
   id: string;
@@ -35,36 +26,90 @@ const mockAdmin: Admin = {
 export const [AuthProvider, useAuth] = createContextHook(() => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [supabaseUser, setSupabaseUser] = useState<any | null>(null);
 
-  // Listen to Firebase auth state changes
+  // Listen to Supabase auth state changes
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      console.log('Auth state changed:', firebaseUser?.email);
-      setFirebaseUser(firebaseUser);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      const user = session?.user;
+      console.log('Auth state changed:', user?.email);
+      setSupabaseUser(user || null);
 
-      if (firebaseUser) {
+      if (user) {
         try {
           // Check if it's admin
-          if (firebaseUser.email === 'admin@sgu.edu.in') {
+          if (user.email === 'admin@sgu.edu.in') {
             const adminUser: Admin = {
-              id: DEFAULT_ADMIN_ID,  // Use the constant admin ID for consistency with messaging
-              name: firebaseUser.displayName || 'Admin',
-              email: firebaseUser.email || '',
+              id: DEFAULT_ADMIN_ID,
+              name: user.user_metadata?.name || 'Admin',
+              email: user.email || '',
               role: 'admin',
             };
             await AsyncStorage.setItem('user', JSON.stringify(adminUser));
             setUser(adminUser);
           } else {
-            // Load student profile from Firestore
-            const studentDoc = await getDoc(doc(db, 'students', firebaseUser.uid));
-            if (studentDoc.exists()) {
-              const studentData = studentDoc.data() as Student;
+            // Load student profile from Supabase
+            const { data: studentData, error } = await supabase
+              .from('students')
+              .select('*')
+              .eq('id', user.id)
+              .maybeSingle();
+
+            if (error) {
+              console.error('Error fetching student:', error.message);
+            }
+
+            if (!studentData) {
+              console.log('Student not found, creating placeholder');
+              // Create a minimal placeholder so they can log in
+              const basicStudent: Student = {
+                id: user.id,
+                name: user.user_metadata?.name || 'Student',
+                email: user.email || '',
+                phone: '',
+                course: '',
+                year: '',
+                cgpa: 0,
+                skills: [],
+                profileCompleted: false,
+              };
+              try {
+                // Insert with snake_case column names
+                await supabase.from('students').insert([{
+                  id: basicStudent.id,
+                  name: basicStudent.name,
+                  email: basicStudent.email,
+                  phone: basicStudent.phone,
+                  course: basicStudent.course,
+                  year: basicStudent.year,
+                  cgpa: basicStudent.cgpa,
+                  skills: basicStudent.skills,
+                  profile_completed: basicStudent.profileCompleted,
+                  created_at: new Date().toISOString()
+                }]);
+              } catch (writeErr) {
+                console.warn('Could not write placeholder student:', writeErr);
+              }
+              await AsyncStorage.setItem('user', JSON.stringify(basicStudent));
+              setUser(basicStudent);
+            } else {
+              // Convert snake_case to camelCase
+              const convertedStudent: Student = {
+                id: studentData.id,
+                name: studentData.name,
+                email: studentData.email,
+                phone: studentData.phone || '',
+                course: studentData.course || '',
+                year: studentData.year || '',
+                cgpa: studentData.cgpa || 0,
+                skills: studentData.skills || [],
+                profileCompleted: studentData.profile_completed || false,
+              };
 
               // Check if admin has deactivated this student
-              if (studentData.isActive === false) {
-                console.log('Blocked inactive student from logging in:', firebaseUser.email);
-                await signOut(auth);
+              if (studentData.is_active === false) {
+                console.log('Blocked inactive student from logging in:', user.email);
+                await supabase.auth.signOut();
                 await AsyncStorage.removeItem('user');
                 setUser(null);
                 setIsLoading(false);
@@ -76,35 +121,13 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
                 return;
               }
 
-              await AsyncStorage.setItem('user', JSON.stringify(studentData));
-              setUser(studentData);
-              console.log('Loaded student profile:', studentData.name);
-            } else {
-              // No Firestore doc — student was created via admin panel (doc should exist)
-              // or doc was deleted. Create a minimal placeholder so they can log in.
-              const basicStudent: Student = {
-                id: firebaseUser.uid,
-                name: firebaseUser.displayName || 'Student',
-                email: firebaseUser.email || '',
-                phone: '',
-                course: '',
-                year: '',
-                cgpa: 0,
-                skills: [],
-                profileCompleted: false,
-              };
-              try {
-                await setDoc(doc(db, 'students', firebaseUser.uid), basicStudent, { merge: true });
-              } catch (writeErr) {
-                console.warn('Could not write placeholder student doc:', writeErr);
-              }
-              await AsyncStorage.setItem('user', JSON.stringify(basicStudent));
-              setUser(basicStudent);
+              await AsyncStorage.setItem('user', JSON.stringify(convertedStudent));
+              setUser(convertedStudent);
+              console.log('Loaded student profile:', convertedStudent.name);
             }
           }
         } catch (error) {
           console.error('Error loading user profile:', error);
-          // Do NOT leave user stuck — set to null so they see the login screen
           setUser(null);
         }
       } else {
@@ -114,7 +137,9 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       setIsLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      subscription?.unsubscribe();
+    };
   }, []);
 
   const login = async (email: string, password: string, userType: 'student' | 'admin' = 'student') => {
@@ -123,27 +148,25 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       const trimmedEmail = email.trim().toLowerCase();
       console.log('Login attempt:', { email: trimmedEmail, userType });
 
-      let userCredential;
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: trimmedEmail,
+        password
+      });
+
+      if (error) throw error;
       
-      // Try to sign in with existing account
-      userCredential = await signInWithEmailAndPassword(auth, trimmedEmail, password);
-      
-      console.log('Firebase login successful:', userCredential.user.email);
-      // Auth state listener will handle the rest
-      
+      console.log('Supabase login successful:', data.user?.email);
       return { success: true, userType };
     } catch (error: any) {
-      console.error('Login error:', error.code, error.message);
+      console.error('Login error:', error.message);
       
       let errorMessage = 'Login failed';
-      if (error.code === 'auth/user-not-found') {
+      if (error.message?.includes('Invalid login credentials')) {
+        errorMessage = 'Incorrect email or password. Please try again.';
+      } else if (error.message?.includes('User not found')) {
         errorMessage = 'Student account not found. Please contact admin.';
-      } else if (error.code === 'auth/wrong-password') {
-        errorMessage = 'Incorrect password. Please try again.';
-      } else if (error.code === 'auth/invalid-email') {
-        errorMessage = 'Invalid email format.';
-      } else if (error.code === 'auth/user-disabled') {
-        errorMessage = 'This account has been disabled.';
+      } else if (error.message?.includes('Email not confirmed')) {
+        errorMessage = 'Please verify your email address first.';
       }
       
       return { success: false, error: errorMessage };
@@ -154,13 +177,24 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
   const logout = async () => {
     try {
-      await signOut(auth);
+      console.log('Initiating logout...');
+      // 1. Attempt server-side sign out (optional, might fail if already signed out or network issues)
+      try {
+        await supabase.auth.signOut();
+      } catch (err) {
+        console.warn('Supabase signOut error (ignoring):', err);
+      }
+      
+      // 2. ABSOLUTELY clear local state regardless of server response
       await AsyncStorage.removeItem('user');
       setUser(null);
-      setFirebaseUser(null);
-      console.log('Logout successful');
+      setSupabaseUser(null);
+      
+      console.log('✅ Logout sequence complete');
     } catch (error) {
-      console.error('Error logging out:', error);
+      console.error('Logout error:', error);
+      // Ensure we at least try to clear state to let user retry
+      setUser(null);
     }
   };
 
@@ -169,9 +203,24 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
       setUser(updatedUser);
       
-      // Update in Firestore if it's a student
+      // Update in Supabase if it's a student (not admin)
       if ('course' in updatedUser) {
-        await setDoc(doc(db, 'students', updatedUser.id), updatedUser, { merge: true });
+        const { error } = await supabase
+          .from('students')
+          .update({
+            name: updatedUser.name,
+            email: updatedUser.email,
+            phone: updatedUser.phone,
+            course: updatedUser.course,
+            year: updatedUser.year,
+            cgpa: updatedUser.cgpa,
+            skills: updatedUser.skills,
+            profile_completed: updatedUser.profileCompleted,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', updatedUser.id);
+        
+        if (error) throw error;
       }
     } catch (error) {
       console.error('Error updating user:', error);
@@ -183,9 +232,24 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       await AsyncStorage.setItem('user', JSON.stringify(updatedStudent));
       setUser(updatedStudent);
       
-      // Update in Firestore
-      if (firebaseUser) {
-        await setDoc(doc(db, 'students', firebaseUser.uid), updatedStudent, { merge: true });
+      // Update in Supabase - convert camelCase to snake_case
+      if (supabaseUser) {
+        const { error } = await supabase
+          .from('students')
+          .update({
+            name: updatedStudent.name,
+            email: updatedStudent.email,
+            phone: updatedStudent.phone,
+            course: updatedStudent.course,
+            year: updatedStudent.year,
+            cgpa: updatedStudent.cgpa,
+            skills: updatedStudent.skills,
+            profile_completed: updatedStudent.profileCompleted,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', supabaseUser.id);
+        
+        if (error) throw error;
       } else {
         throw new Error('User not authenticated');
       }
@@ -202,9 +266,27 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       await AsyncStorage.setItem('user', JSON.stringify(completedProfile));
       setUser(completedProfile);
       
-      // Update in Firestore
-      if (firebaseUser) {
-        await setDoc(doc(db, 'students', firebaseUser.uid), completedProfile, { merge: true });
+      // Update in Supabase — convert camelCase to snake_case
+      if (supabaseUser) {
+        const { error } = await supabase
+          .from('students')
+          .update({
+            name: completedProfile.name,
+            email: completedProfile.email,
+            phone: completedProfile.phone,
+            course: completedProfile.course,
+            year: completedProfile.year,
+            cgpa: completedProfile.cgpa,
+            skills: completedProfile.skills,
+            profile_completed: true,
+            prn_number: completedProfile.prnNumber || null,
+            enrollment_no: completedProfile.enrollmentNo || null,
+            address: completedProfile.address || null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', supabaseUser.id);
+        
+        if (error) throw error;
       } else {
         throw new Error('User not authenticated');
       }
@@ -217,12 +299,13 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
   const getAvailableStudents = useCallback(async () => {
     try {
-      const q = query(collection(db, 'students'));
-      const snapshot = await getDocs(q);
-      return snapshot.docs.map(doc => ({
-        uid: doc.id,
-        ...doc.data()
-      }));
+      const { data, error } = await supabase
+        .from('students')
+        .select('*');
+
+      if (error) throw error;
+      
+      return data || [];
     } catch (error) {
       console.error('Error getting students:', error);
       return [];
@@ -233,7 +316,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     user,
     student: user && 'course' in user ? user : null,
     admin: user && 'role' in user ? user : null,
-    firebaseUser,
+    supabaseUser,
     isLoading,
     login,
     logout,
