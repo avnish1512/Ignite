@@ -18,6 +18,7 @@ import { useJobs } from '@/hooks/jobs-store';
 import { useAuth } from '@/hooks/auth-store';
 import { useTheme } from '@/hooks/theme-store';
 import { formatSalary } from '@/hooks/salary-utils';
+import { sanitizeText } from '@/hooks/text-utils';
 
 export default function JobDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -29,9 +30,16 @@ export default function JobDetailScreen() {
   const [applicationStatus, setApplicationStatus] = useState<'Eligible' | 'Not Eligible' | 'Applied' | null>(null);
 
   const job = getJobById(id!);
+  const { applications } = useJobs();
   
-  // Use local application status if set, otherwise use job status
-  const currentEligibilityStatus = applicationStatus || job?.eligibilityStatus;
+  // Find if this student has already applied for this job
+  const existingApplication = React.useMemo(() => {
+    if (!student || !id) return null;
+    return applications.find(app => (app.jobId === id || app.jobId === job?.id) && app.studentId === student.id);
+  }, [applications, id, student, job?.id]);
+
+  // Use local application status if set, otherwise check existing applications, otherwise use job default
+  const currentEligibilityStatus = applicationStatus || (existingApplication ? 'Applied' : job?.eligibilityStatus);
 
   if (!job) {
     return (
@@ -79,6 +87,18 @@ export default function JobDetailScreen() {
 
     if (!student.id) {
       Alert.alert('Error', 'Student ID is missing. Please logout and login again.');
+      return;
+    }
+
+    if (!student.profileCompleted) {
+      Alert.alert(
+        'Profile Incomplete',
+        'Please complete your profile details before applying for jobs.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Go to Profile', onPress: () => router.push('/profile-setup') }
+        ]
+      );
       return;
     }
 
@@ -202,10 +222,12 @@ export default function JobDetailScreen() {
             <Calendar size={20} color="#F59E0B" />
             <Text style={styles.detailLabel}>Deadline</Text>
             <Text style={styles.detailValue}>
-              {new Date(job.registrationDeadline).toLocaleDateString('en-IN', {
-                day: 'numeric',
-                month: 'short'
-              })}
+              {(() => {
+                const deadline = new Date(job.registrationDeadline);
+                return !isNaN(deadline.getTime()) 
+                  ? deadline.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+                  : 'N/A';
+              })()}
             </Text>
           </View>
         </View>
@@ -225,7 +247,9 @@ export default function JobDetailScreen() {
         {/* Job Description */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Job Description</Text>
-          <Text style={styles.description}>{job.description}</Text>
+          <Text style={styles.description}>
+            {sanitizeText(job.description, 'No detailed description provided for this position.')}
+          </Text>
         </View>
 
         {/* Requirements */}
@@ -260,16 +284,21 @@ export default function JobDetailScreen() {
           <View style={styles.deadlineInfo}>
             <Text style={styles.deadlineTitle}>Application Deadline</Text>
             <Text style={styles.deadlineText}>
-              {new Date(job.registrationDeadline).toLocaleDateString('en-IN', {
-                weekday: 'long',
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric'
-              })} at {new Date(job.registrationDeadline).toLocaleTimeString('en-IN', {
-                hour: 'numeric',
-                minute: '2-digit',
-                hour12: true
-              })}
+              {(() => {
+                const deadline = new Date(job.registrationDeadline);
+                if (isNaN(deadline.getTime())) return 'No deadline specified';
+                
+                return `${deadline.toLocaleDateString('en-IN', {
+                  weekday: 'long',
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric'
+                })} at ${deadline.toLocaleTimeString('en-IN', {
+                  hour: 'numeric',
+                  minute: '2-digit',
+                  hour12: true
+                })}`;
+              })()}
             </Text>
           </View>
         </View>

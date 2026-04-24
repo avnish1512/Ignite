@@ -160,7 +160,7 @@ export const usePhotoUpload = () => {
         await supabase
           .from('students')
           .update({
-            profile_photo: downloadUrl,
+            profile_image_url: downloadUrl,
             profile_photo_path: storagePath,
           })
           .eq('id', studentId);
@@ -205,8 +205,8 @@ export const usePhotoUpload = () => {
       await supabase
         .from('students')
         .update({
-          profilePhoto: null,
-          profilePhotoPath: null,
+          profile_image_url: null,
+          profile_photo_path: null,
         })
         .eq('id', studentId);
 

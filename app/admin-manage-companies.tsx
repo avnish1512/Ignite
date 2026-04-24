@@ -97,7 +97,7 @@ export default function ManageCompanies() {
     .filter(company => {
       const matchesSearch = company.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                            company.industry.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                           company.location.toLowerCase().includes(searchQuery.toLowerCase());
+                           (company.location?.toLowerCase().includes(searchQuery.toLowerCase()) || false);
       return matchesSearch;
     })
     .sort((a, b) => {

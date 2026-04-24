@@ -1,0 +1,12 @@
+app/admin-dashboard.tsx(39,10): error TS2339: Property 'catch' does not exist on type 'PromiseLike<void>'.
+app/admin-manage-companies.tsx(100,28): error TS18048: 'company.location' is possibly 'undefined'.
+app/register.tsx(290,33): error TS2345: Argument of type '{ container: { flex: number; backgroundColor: string; }; scrollContent: { padding: number; flexGrow: number; justifyContent: "center"; }; backButton: { position: "absolute"; top: number; left: number; zIndex: number; padding: number; }; ... 14 more ...; linkText: { ...; }; }' is not assignable to parameter of type '{ container: { flex: number; backgroundColor: string; }; scrollContent: { padding: number; flexGrow: number; justifyContent: "center"; }; backButton: { position: "absolute"; top: number; left: number; zIndex: number; padding: number; }; ... 14 more ...; linkText: { ...; }; } & NamedStyles<...>'.
+  Property 'inputWrapper' is incompatible with index signature.
+    Object literal may only specify known properties, but 'borderWidt' does not exist in type 'ViewStyle | TextStyle | ImageStyle'. Did you mean to write 'borderWidth'?
+app/settings.tsx(304,29): error TS2304: Cannot find name 'styles'.
+app/settings.tsx(306,22): error TS2304: Cannot find name 'styles'.
+app/settings.tsx(307,25): error TS2304: Cannot find name 'styles'.
+hooks/theme-store.ts(58,3): error TS2322: Type '{ readonly background: "#F9FAFB"; readonly surface: "#FFFFFF"; readonly surfaceAlt: "#F3F4F6"; readonly border: "#F3F4F6"; readonly borderStrong: "#E5E7EB"; readonly text: "#111827"; ... 12 more ...; readonly isDark: false; } | { ...; }' is not assignable to type '{ readonly background: "#F9FAFB"; readonly surface: "#FFFFFF"; readonly surfaceAlt: "#F3F4F6"; readonly border: "#F3F4F6"; readonly borderStrong: "#E5E7EB"; readonly text: "#111827"; ... 12 more ...; readonly isDark: false; }'.
+  Type '{ readonly background: "#0F0F11"; readonly surface: "#1C1C1E"; readonly surfaceAlt: "#2C2C2E"; readonly border: "#2C2C2E"; readonly borderStrong: "#3A3A3C"; readonly text: "#F9FAFB"; ... 12 more ...; readonly isDark: true; }' is not assignable to type '{ readonly background: "#F9FAFB"; readonly surface: "#FFFFFF"; readonly surfaceAlt: "#F3F4F6"; readonly border: "#F3F4F6"; readonly borderStrong: "#E5E7EB"; readonly text: "#111827"; ... 12 more ...; readonly isDark: false; }'.
+    Types of property 'background' are incompatible.
+      Type '"#0F0F11"' is not assignable to type '"#F9FAFB"'.

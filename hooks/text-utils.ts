@@ -1,38 +1,45 @@
 /**
- * Text formatting utilities for consistent display.
+ * Text utility functions for the Ignite Portal.
  */
 
 /**
- * Capitalizes the first letter of each word in a string.
- * Handles edge cases: null, undefined, empty string, extra spaces.
- *
- * @example
- *   capitalizeWords("prajwal kumar")  → "Prajwal Kumar"
- *   capitalizeWords("JOHN DOE")       → "John Doe"
- *   capitalizeWords("")               → ""
- *   capitalizeWords(null)             → ""
+ * Sanitizes strings from the database, handling common placeholders
+ * like "none", "N/A", or empty values.
  */
-export function capitalizeWords(name: string | null | undefined): string {
-  if (!name || typeof name !== 'string') return '';
-  return name
-    .trim()
-    .split(/\s+/)
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(' ');
+export function sanitizeText(text: string | null | undefined, fallback: string = ''): string {
+  if (!text) return fallback;
+  const lower = text.toLowerCase().trim();
+  if (lower === 'none' || lower === 'n/a' || lower === 'null' || lower === 'undefined') {
+    return fallback;
+  }
+  return text;
 }
 
 /**
- * Returns initials from a name (max 2 characters).
- *
- * @example
- *   getInitials("Prajwal Kumar") → "PK"
- *   getInitials("John")          → "J"
+ * Returns a dynamic greeting based on the current time of day.
  */
-export function getInitials(name: string | null | undefined): string {
-  if (!name || typeof name !== 'string') return '?';
-  const parts = name.trim().split(/\s+/);
-  if (parts.length >= 2) {
-    return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
-  }
-  return parts[0].charAt(0).toUpperCase();
+export function getDynamicGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
+/**
+ * Capitalizes the first letter of each word in a string.
+ */
+export function capitalizeWords(str: string): string {
+  if (!str) return '';
+  return str.split(' ').map(word => 
+    word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+  ).join(' ');
+}
+/**
+ * Returns initials from a full name (e.g., "John Doe" -> "JD").
+ */
+export function getInitials(name: string): string {
+  if (!name) return '??';
+  const parts = name.trim().split(' ');
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
 }

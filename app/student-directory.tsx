@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, router } from 'expo-router';
 import { Search, MessageCircle, ArrowLeft, Users } from 'lucide-react-native';
@@ -15,6 +15,7 @@ interface StudentItem {
   email: string;
   course: string;
   year: string;
+  profileImageUrl?: string;
 }
 
 export default function StudentDirectoryScreen() {
@@ -34,7 +35,7 @@ export default function StudentDirectoryScreen() {
       try {
         const { data, error } = await supabase
           .from('students')
-          .select('id, name, email, course, year');
+          .select('id, name, email, course, year, profile_image_url');
 
         if (error) throw error;
         
@@ -45,6 +46,7 @@ export default function StudentDirectoryScreen() {
             email: doc.email || '',
             course: doc.course || '',
             year: doc.year || '',
+            profileImageUrl: doc.profile_image_url || undefined,
           }))
           // Filter out the current student
           .filter(s => s.id !== student?.id);
@@ -84,8 +86,14 @@ export default function StudentDirectoryScreen() {
         peer.name
       );
       if (conv) {
-        // Navigate back to messages tab — the conversation will be in the list
-        router.back();
+        // Navigate directly to the chat
+        router.push({
+          pathname: '/(tab)/messages' as any,
+          params: { 
+            conversationId: conv.id,
+            senderName: peer.name
+          }
+        });
       }
     } catch (error) {
       console.error('Error creating peer conversation:', error);
@@ -109,8 +117,15 @@ export default function StudentDirectoryScreen() {
 
   const renderStudent = ({ item }: { item: StudentItem }) => (
     <View style={styles.studentCard}>
-      <View style={[styles.avatar, { backgroundColor: getAvatarColor(item.name) }]}>
-        <Text style={styles.avatarText}>{getInitials(item.name)}</Text>
+      <View style={[styles.avatar, !item.profileImageUrl && { backgroundColor: getAvatarColor(item.name) }]}>
+        {item.profileImageUrl ? (
+          <Image
+            source={{ uri: item.profileImageUrl }}
+            style={styles.avatarImage}
+          />
+        ) : (
+          <Text style={styles.avatarText}>{getInitials(item.name)}</Text>
+        )}
       </View>
       <View style={styles.studentInfo}>
         <Text style={styles.studentName}>{capitalizeWords(item.name)}</Text>
@@ -305,6 +320,11 @@ function makeStyles(theme: ReturnType<typeof useTheme>) {
       color: '#FFFFFF',
       fontSize: 18,
       fontWeight: '700',
+    },
+    avatarImage: {
+      width: '100%',
+      height: '100%',
+      borderRadius: 24,
     },
     studentInfo: {
       flex: 1,

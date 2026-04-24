@@ -287,7 +287,7 @@ const styles = StyleSheet.create({
   form: { width: '100%', gap: 16 },
   inputWrapper: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: '#F9FAFB', borderWidt: 1, borderColor: '#E5E7EB',
+    backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#E5E7EB',
     borderRadius: 16, paddingHorizontal: 16, height: 58,
   },
   input: { flex: 1, fontSize: 16, color: '#1F2937' },

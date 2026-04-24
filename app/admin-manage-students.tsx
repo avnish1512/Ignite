@@ -42,10 +42,18 @@ export default function AdminManageStudents() {
       if (showRefreshing) setIsRefreshing(true);
       else setIsLoading(true);
       const { data, error } = await supabase.from('students').select('*');
-      if (error) throw error;
+      if (error) {
+        // Provide detailed error message for RLS policy failures
+        if (error.code === 'PGRST116') {
+          throw new Error('Admin access denied. Verify your admin credentials are set up correctly in Supabase.');
+        }
+        throw error;
+      }
       setStudents(data || []);
-    } catch (error) {
-      Alert.alert('Error', 'Failed to load students.');
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Failed to load students.';
+      Alert.alert('Error', errorMessage);
+      console.error('Student fetch error:', error);
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -64,6 +72,37 @@ export default function AdminManageStudents() {
     } finally {
       setUpdatingId(null);
     }
+  };
+
+  const handleDeleteStudent = async (student: Student) => {
+    Alert.alert(
+      'Delete Student',
+      `Are you sure you want to permanently delete ${student.name || student.email}? This action cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Delete', 
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setUpdatingId(student.id);
+              const { error } = await supabase.from('students').delete().eq('id', student.id);
+              if (error) throw error;
+              
+              // Also attempt to delete from settings if exists
+              await supabase.from('settings').delete().eq('userId', student.id);
+              
+              setStudents(prev => prev.filter(s => s.id !== student.id));
+              Alert.alert('Success', 'Student record deleted successfully.');
+            } catch (error) {
+              Alert.alert('Error', 'Failed to delete student.');
+            } finally {
+              setUpdatingId(null);
+            }
+          }
+        }
+      ]
+    );
   };
 
   const filteredStudents = students.filter(s => {
@@ -194,7 +233,15 @@ export default function AdminManageStudents() {
                     style={styles.actionButton}
                     onPress={() => Alert.alert('Details', JSON.stringify(student, null, 2))}
                   >
-                    <Text style={styles.actionButtonText}>View Full Profile</Text>
+                    <Text style={styles.actionButtonText}>View Details</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity 
+                    style={[styles.actionButton, styles.deleteBtn]}
+                    onPress={() => handleDeleteStudent(student)}
+                    disabled={updatingId === student.id}
+                  >
+                    <Trash2 size={16} color="#EF4444" />
                   </TouchableOpacity>
                 </View>
               </View>
@@ -263,4 +310,9 @@ const styles = StyleSheet.create({
   actionButtonText: { fontSize: 11, fontWeight: '600', color: '#374151' },
   deactivateBtn: { borderColor: '#FEE2E2', backgroundColor: '#FFF5F5' },
   activateBtn: { borderColor: '#E0E7FF', backgroundColor: '#EEF2FF' },
+  deleteBtn: {
+    maxWidth: 44,
+    borderColor: '#FEE2E2',
+    backgroundColor: '#FFF5F5',
+  },
 });

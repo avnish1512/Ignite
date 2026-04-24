@@ -4,6 +4,7 @@ import {
   TextInput, KeyboardAvoidingView, Platform, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Stack, router } from 'expo-router';
 import { Send, ArrowLeft, Search, MessageSquare, RefreshCw, User, MoreHorizontal } from 'lucide-react-native';
 import { useAuth } from '@/hooks/auth-store';
 import { useMessaging } from '@/hooks/messaging-store';
@@ -112,6 +113,18 @@ export default function AdminMessagingScreen() {
   const [selectedName, setSelectedName] = useState('');
   const [searchText, setSearchText] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+
+  // ── Check admin role ─────────────────────────────────────
+  if (!admin) {
+    useEffect(() => {
+      router.replace('/' as any);
+    }, []);
+    return (
+      <SafeAreaView style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color="#6366F1" />
+      </SafeAreaView>
+    );
+  }
 
   useEffect(() => {
     if (admin) {

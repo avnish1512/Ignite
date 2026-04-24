@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, KeyboardAvoidingView, Platform, Dimensions, ScrollView, StatusBar } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, KeyboardAvoidingView, Platform, Dimensions, ScrollView, StatusBar, Animated, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, router } from 'expo-router';
-import { Eye, EyeOff } from 'lucide-react-native';
+import { Eye, EyeOff, Flame } from 'lucide-react-native';
 import { useAuth } from '@/hooks/auth-store';
+import { useTheme } from '@/hooks/theme-store';
 import { supabase } from '@/config/supabase';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -14,6 +15,18 @@ export default function UnifiedLoginScreen() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const { login, isLoading } = useAuth();
+  const theme = useTheme();
+
+  // Entrance animation
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(30)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+      Animated.timing(slideAnim, { toValue: 0, duration: 600, useNativeDriver: true }),
+    ]).start();
+  }, []);
 
   const handleSignIn = async () => {
     if (!email || !password) {
@@ -33,7 +46,6 @@ export default function UnifiedLoginScreen() {
         router.replace('/admin-dashboard' as any);
       } else {
         // For students: check Supabase for profileCompleted flag
-        // This determines if they are new (go to info form) or returning (go to dashboard)
         try {
           const { data: { user } } = await supabase.auth.getUser();
 
@@ -51,19 +63,15 @@ export default function UnifiedLoginScreen() {
             }
 
             if (studentData?.profile_completed === true) {
-              // Returning student — go straight to dashboard
               router.replace('/(tab)');
             } else {
-              // New student — go to profile information form
               router.replace('/profile-setup' as any);
             }
           } else {
-            // Not logged in, shouldn't happen
             router.replace('/(tab)');
           }
         } catch (err) {
           console.error('Error checking profile status:', err);
-          // Safe fallback: send to profile-setup (better than skipping it)
           router.replace('/profile-setup' as any);
         }
       }
@@ -78,212 +86,219 @@ export default function UnifiedLoginScreen() {
     }
   };
 
+  const s = makeStyles(theme);
+
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={s.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+      <StatusBar barStyle={theme.isDark ? 'light-content' : 'dark-content'} backgroundColor={theme.background} />
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboardView}
+        style={s.keyboardView}
       >
         <ScrollView 
-          contentContainerStyle={styles.scrollContent} 
+          contentContainerStyle={s.scrollContent} 
           showsVerticalScrollIndicator={false}
           bounces={false}
         >
-          <View style={styles.logoContainer}>
-            <View style={styles.logoIconBox}>
-              <Text style={styles.logoIcon}>🚀</Text>
+          <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
+            <View style={s.logoContainer}>
+              <View style={s.logoIconBox}>
+                <Flame size={34} color="#FFFFFF" fill="#FFFFFF" />
+              </View>
+              <Text style={s.logoText}>Ignite</Text>
             </View>
-            <Text style={styles.logoText}>Ignite</Text>
-          </View>
 
-          <View style={styles.headerContainer}>
-            <Text style={styles.title}>Welcome to Ignite</Text>
-            <Text style={styles.subtitle}>Placement Portal</Text>
-          </View>
+            <View style={s.headerContainer}>
+              <Text style={s.title}>Welcome to Ignite</Text>
+              <Text style={s.subtitle}>Placement Portal</Text>
+            </View>
 
-          <View style={styles.form}>
-            <TextInput
-              style={styles.input}
-              placeholder="Email"
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              placeholderTextColor="#9CA3AF"
-              editable={!isLoading}
-            />
-
-            <View style={styles.passwordContainer}>
+            <View style={s.form}>
               <TextInput
-                style={[styles.input, styles.passwordInput]}
-                placeholder="Password"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPassword}
-                placeholderTextColor="#9CA3AF"
+                style={s.input}
+                placeholder="Email"
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                placeholderTextColor={theme.textMuted}
                 editable={!isLoading}
               />
+
+              <View style={s.passwordContainer}>
+                <TextInput
+                  style={[s.input, s.passwordInput]}
+                  placeholder="Password"
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry={!showPassword}
+                  placeholderTextColor={theme.textMuted}
+                  editable={!isLoading}
+                />
+                <TouchableOpacity 
+                  style={s.eyeIcon} 
+                  onPress={() => setShowPassword(!showPassword)}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                >
+                  {showPassword ? (
+                    <EyeOff size={20} color={theme.textMuted} />
+                  ) : (
+                    <Eye size={20} color={theme.textMuted} />
+                  )}
+                </TouchableOpacity>
+              </View>
+
               <TouchableOpacity 
-                style={styles.eyeIcon} 
-                onPress={() => setShowPassword(!showPassword)}
-                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                style={[
+                  s.signInButton, 
+                  isLoading && s.signInButtonDisabled
+                ]} 
+                onPress={handleSignIn}
+                disabled={isLoading}
+                activeOpacity={0.85}
               >
-                {showPassword ? (
-                  <EyeOff size={20} color="#9CA3AF" />
+                {isLoading ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                    <Text style={s.signInButtonText}>Signing In...</Text>
+                  </View>
                 ) : (
-                  <Eye size={20} color="#9CA3AF" />
+                  <Text style={s.signInButtonText}>Sign In</Text>
                 )}
               </TouchableOpacity>
             </View>
 
-            <TouchableOpacity 
-              style={[
-                styles.signInButton, 
-                isLoading && styles.signInButtonDisabled
-              ]} 
-              onPress={handleSignIn}
-              disabled={isLoading}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.signInButtonText}>
-                {isLoading ? 'Signing In...' : 'Sign In'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
+            <View style={s.footer}>
+              <Text style={s.footerText}>Ignite Placement Portal v1.0.0</Text>
+            </View>
+          </Animated.View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-  },
-  keyboardView: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    paddingVertical: 40,
-    paddingHorizontal: 24,
-  },
-  logoContainer: {
-    alignItems: 'center',
-    marginBottom: 32,
-  },
-  logoIconBox: {
-    width: 72,
-    height: 72,
-    borderRadius: 20,
-    backgroundColor: '#6366F1',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
-    shadowColor: '#6366F1',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 8,
-  },
-  logoIcon: {
-    fontSize: 34,
-  },
-  logoText: {
-    fontSize: isTablet ? 26 : 22,
-    fontWeight: '800',
-    color: '#1F2937',
-    letterSpacing: 1,
-  },
-  headerContainer: {
-    alignItems: 'center',
-    marginBottom: 32,
-  },
-  title: {
-    fontSize: isTablet ? 28 : 28,
-    fontWeight: '700',
-    color: '#002B5B',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  subtitle: {
-    fontSize: isTablet ? 16 : 14,
-    color: '#9CA3AF',
-    textAlign: 'center',
-    fontWeight: '500',
-  },
-  form: {
-    width: '100%',
-    marginBottom: 32,
-  },
-  input: {
-    width: '100%',
-    backgroundColor: '#F9FAFB',
-    borderWidth: 1,
-    borderColor: '#F3F4F6',
-    borderRadius: 12,
-    paddingVertical: isTablet ? 18 : 16,
-    paddingHorizontal: 16,
-    fontSize: isTablet ? 16 : 15,
-    color: '#1F2937',
-    fontWeight: '500',
-    marginBottom: 16,
-  },
-  passwordContainer: {
-    position: 'relative',
-    width: '100%',
-    marginBottom: 16,
-  },
-  passwordInput: {
-    paddingRight: 48,
-    marginBottom: 0,
-  },
-  eyeIcon: {
-    position: 'absolute',
-    right: 14,
-    top: '50%',
-    transform: [{ translateY: -10 }],
-  },
-  signInButton: {
-    backgroundColor: '#E2231A',
-    width: '100%',
-    paddingVertical: isTablet ? 18 : 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#E2231A',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  signInButtonDisabled: {
-    backgroundColor: '#9CA3AF',
-    shadowOpacity: 0,
-    elevation: 0,
-  },
-  signInButtonText: {
-    color: '#FFFFFF',
-    fontSize: isTablet ? 18 : 16,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  registerLink: {
-    alignItems: 'center',
-    paddingTop: 16,
-  },
-  registerLinkText: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  registerLinkHighlight: {
-    color: '#6366F1',
-    fontWeight: '600',
-  },
-});
+function makeStyles(theme: ReturnType<typeof useTheme>) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: theme.background,
+    },
+    keyboardView: {
+      flex: 1,
+    },
+    scrollContent: {
+      flexGrow: 1,
+      justifyContent: 'center',
+      paddingVertical: 40,
+      paddingHorizontal: 24,
+    },
+    logoContainer: {
+      alignItems: 'center',
+      marginBottom: 32,
+    },
+    logoIconBox: {
+      width: 72,
+      height: 72,
+      borderRadius: 20,
+      backgroundColor: theme.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 12,
+      shadowColor: theme.primary,
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.3,
+      shadowRadius: 12,
+      elevation: 8,
+    },
+    logoText: {
+      fontSize: isTablet ? 26 : 22,
+      fontWeight: '800',
+      color: theme.text,
+      letterSpacing: 1,
+    },
+    headerContainer: {
+      alignItems: 'center',
+      marginBottom: 32,
+    },
+    title: {
+      fontSize: isTablet ? 28 : 28,
+      fontWeight: '700',
+      color: theme.primary,
+      marginBottom: 8,
+      textAlign: 'center',
+    },
+    subtitle: {
+      fontSize: isTablet ? 16 : 14,
+      color: theme.textMuted,
+      textAlign: 'center',
+      fontWeight: '500',
+    },
+    form: {
+      width: '100%',
+      marginBottom: 32,
+    },
+    input: {
+      width: '100%',
+      backgroundColor: theme.surfaceAlt,
+      borderWidth: 1,
+      borderColor: theme.borderStrong,
+      borderRadius: 12,
+      paddingVertical: isTablet ? 18 : 16,
+      paddingHorizontal: 16,
+      fontSize: isTablet ? 16 : 15,
+      color: theme.text,
+      fontWeight: '500',
+      marginBottom: 16,
+    },
+    passwordContainer: {
+      position: 'relative',
+      width: '100%',
+      marginBottom: 16,
+    },
+    passwordInput: {
+      paddingRight: 48,
+      marginBottom: 0,
+    },
+    eyeIcon: {
+      position: 'absolute',
+      right: 14,
+      top: '50%',
+      transform: [{ translateY: -10 }],
+    },
+    signInButton: {
+      backgroundColor: '#E2231A',
+      width: '100%',
+      paddingVertical: isTablet ? 18 : 16,
+      borderRadius: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#E2231A',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.15,
+      shadowRadius: 8,
+      elevation: 3,
+    },
+    signInButtonDisabled: {
+      backgroundColor: theme.textMuted,
+      shadowOpacity: 0,
+      elevation: 0,
+    },
+    signInButtonText: {
+      color: '#FFFFFF',
+      fontSize: isTablet ? 18 : 16,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+    },
+    footer: {
+      alignItems: 'center',
+      paddingTop: 16,
+    },
+    footerText: {
+      fontSize: 12,
+      color: theme.textMuted,
+    },
+  });
+}

@@ -11,7 +11,8 @@ import {
   Shield,
   Star,
   Share2,
-  ChevronRight
+  ChevronRight,
+  Sparkles
 } from 'lucide-react-native';
 import { useAuth } from '@/hooks/auth-store';
 import { useTheme } from '@/hooks/theme-store';
@@ -76,7 +77,7 @@ export default function MoreScreen() {
 
   const handleLogout = async () => {
     await logout();
-    router.replace('/unified-login' as any);
+    // Layout automatically redirects on auth state change
   };
 
   if (!student) {
@@ -146,7 +147,7 @@ export default function MoreScreen() {
 
         {/* App Version */}
         <View style={styles.versionSection}>
-          <Text style={styles.versionText}>Campus Placement v1.0.0</Text>
+          <Text style={styles.versionText}>Ignite Placement Portal v1.0.0</Text>
         </View>
       </ScrollView>
     </SafeAreaView>

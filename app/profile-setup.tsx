@@ -49,8 +49,8 @@ export default function ProfileSetupScreen() {
 
   const [fullName, setFullName] = useState(student?.name || '');
   const [phone, setPhone] = useState(student?.phone || '');
-  const [prnNumber, setPrnNumber] = useState(student?.prn_number || '');
-  const [enrollmentNo, setEnrollmentNo] = useState(student?.enrollment_no || '');
+  const [prnNumber, setPrnNumber] = useState(student?.prnNumber || '');
+  const [enrollmentNo, setEnrollmentNo] = useState(student?.enrollmentNo || '');
   const [course, setCourse] = useState(student?.course || '');
   const [year, setYear] = useState(student?.year || '');
   const [cgpa, setCgpa] = useState(student?.cgpa ? String(student.cgpa) : '');

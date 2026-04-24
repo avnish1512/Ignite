@@ -29,6 +29,7 @@ export interface Conversation {
   type?: 'admin' | 'peer';
   peerId?: string;
   peerName?: string;
+  peerProfileImageUrl?: string;
   participants?: string[];
 }
 
@@ -46,9 +47,9 @@ export const [MessagingProvider, useMessaging] = createContextHook(() => {
   // Real-time listener for messages in a conversation using Supabase
   const setupMessageListener = useCallback((conversationId: string) => {
     try {
-      // Unsubscribe from previous listener if exists
+      // If already subscribed, don't unsubscribe and re-subscribe
       if (channelRefs.current[conversationId]) {
-        supabase.removeChannel(channelRefs.current[conversationId]);
+        return () => {}; // Return no-op cleanup
       }
 
       // Subscribe to real-time changes
@@ -134,13 +135,41 @@ export const [MessagingProvider, useMessaging] = createContextHook(() => {
           student_name: studentName,
           admin_id: finalAdminId,
           admin_name: 'Admin',
+          student_image_url: null, // Will be filled by trigger or initial fetch
+          admin_image_url: null,
           participants: [studentId, finalAdminId],
           last_message: text,
-          last_message_time: new Date().toISOString()
+          last_message_time: new Date().toISOString(),
+          type: 'admin'
         });
       }
 
-      // Add message
+      // Optimistic fix: Add message to local state immediately
+      const newMessage: Message = {
+        id: `temp-${Date.now()}`,
+        senderId: studentId,
+        senderName: studentName,
+        senderRole: 'student',
+        recipientId: finalAdminId,
+        text,
+        timestamp: new Date().toISOString(),
+        read: false
+      };
+
+      setConversations(prev =>
+        prev.map(conv =>
+          conv.id === conversationId
+            ? { 
+                ...conv, 
+                messages: [...(conv.messages || []), newMessage],
+                lastMessage: text,
+                lastMessageTime: new Date()
+              }
+            : conv
+        )
+      );
+
+      // Add message to Supabase
       const { error: msgError } = await supabase.from('messages').insert({
         conversation_id: conversationId,
         sender_id: studentId,
@@ -154,6 +183,7 @@ export const [MessagingProvider, useMessaging] = createContextHook(() => {
 
       if (msgError) {
         console.error('Error inserting message:', msgError);
+        // Rollback optimistic update on error (optional, keeping it simple for now)
         return;
       }
 
@@ -182,7 +212,32 @@ export const [MessagingProvider, useMessaging] = createContextHook(() => {
       const parts = conversationId.split('_');
       const studentId = parts[0] === adminId ? parts[1] : parts[0];
 
-      // Add message
+      // Optimistic fix: Add message to local state immediately
+      const newMessage: Message = {
+        id: `temp-${Date.now()}`,
+        senderId: adminId,
+        senderName: adminName,
+        senderRole: 'admin',
+        recipientId: studentId,
+        text,
+        timestamp: new Date().toISOString(),
+        read: false
+      };
+
+      setConversations(prev =>
+        prev.map(conv =>
+          conv.id === conversationId
+            ? { 
+                ...conv, 
+                messages: [...(conv.messages || []), newMessage],
+                lastMessage: text,
+                lastMessageTime: new Date()
+              }
+            : conv
+        )
+      );
+
+      // Add message to Supabase
       const { error: msgError } = await supabase.from('messages').insert({
         conversation_id: conversationId,
         sender_id: adminId,
@@ -311,13 +366,14 @@ export const [MessagingProvider, useMessaging] = createContextHook(() => {
         messages,
         lastMessage: conversation.last_message || 'No messages yet',
         lastMessageTime: new Date(conversation.last_message_time || Date.now()),
-        unreadCount: messages.filter(m => !m.read && m.recipientId === studentId).length
+        unreadCount: messages.filter(m => !m.read && m.recipientId === studentId).length,
+        type: conversation.type || (conversation.admin_id === 'admin' ? 'admin' : 'peer'),
+        peerProfileImageUrl: conversation.student_id === studentId ? conversation.admin_image_url : conversation.student_image_url
       };
 
       setConversations(prev => {
-        const exists = prev.find(c => c.id === conversationId);
-        if (exists) return prev;
-        return [...prev, conversationObj];
+        const otherConvs = prev.filter(c => c.id !== conversationId);
+        return [...otherConvs, conversationObj];
       });
 
       setupMessageListener(conversationId);
@@ -402,25 +458,8 @@ export const [MessagingProvider, useMessaging] = createContextHook(() => {
         .order('last_message_time', { ascending: false });
 
       if (data) {
-        // Fetch messages for each conversation
-        const convsWithMessages = await Promise.all(data.map(async (c) => {
-          const { data: msgData } = await supabase
-            .from('messages')
-            .select('*')
-            .eq('conversation_id', c.id)
-            .order('timestamp', { ascending: true });
-
-          const messages = (msgData || []).map((msg: any) => ({
-            id: msg.id,
-            senderId: msg.sender_id,
-            senderName: msg.sender_name,
-            senderRole: msg.sender_role,
-            recipientId: msg.recipient_id,
-            text: msg.text,
-            timestamp: msg.timestamp,
-            read: msg.read
-          })) as Message[];
-
+        // Fetch only summary info initially to reduce "glitch/delay"
+        const basicConvs = data.map((c) => {
           setupMessageListener(c.id);
           
           return {
@@ -429,15 +468,20 @@ export const [MessagingProvider, useMessaging] = createContextHook(() => {
             studentName: c.student_name,
             adminId: c.admin_id,
             adminName: c.admin_name,
-            messages,
+            messages: [], // Load on demand
             lastMessage: c.last_message || '',
             lastMessageTime: new Date(c.last_message_time || Date.now()),
-            unreadCount: messages.filter(m => !m.read && m.senderRole === 'student').length,
+            unreadCount: 0, // Will be updated by loadMessages
             participants: c.participants
           } as Conversation;
-        }));
+        });
 
-        setConversations(convsWithMessages);
+        setConversations(basicConvs);
+        
+        // Background load messages for the first few (optional optimization)
+        if (basicConvs.length > 0) {
+           loadMessages(basicConvs[0].id);
+        }
       }
 
       return () => {
@@ -481,6 +525,13 @@ export const [MessagingProvider, useMessaging] = createContextHook(() => {
         return existing;
       }
 
+      // Fetch peer's profile image
+      const { data: peerData } = await supabase
+        .from('students')
+        .select('profile_image_url')
+        .eq('id', peerId)
+        .maybeSingle();
+
       const { data: convData } = await supabase
         .from('conversations')
         .select('*')
@@ -494,9 +545,12 @@ export const [MessagingProvider, useMessaging] = createContextHook(() => {
           student_name: myName,
           admin_id: peerId,
           admin_name: peerName,
+          student_image_url: null,
+          admin_image_url: null,
           participants: [myId, peerId],
           last_message: '',
-          last_message_time: new Date().toISOString()
+          last_message_time: new Date().toISOString(),
+          type: 'peer'
         });
       }
 
@@ -513,6 +567,7 @@ export const [MessagingProvider, useMessaging] = createContextHook(() => {
         type: 'peer',
         peerId,
         peerName,
+        peerProfileImageUrl: peerData?.profile_image_url,
         participants: [myId, peerId]
       };
 
@@ -617,6 +672,12 @@ export const [MessagingProvider, useMessaging] = createContextHook(() => {
 
                     setupMessageListener(c.id);
                     
+                    const isPeer = c.type === 'peer' || (c.admin_id !== 'admin' && c.admin_id !== 'ADMIN_ID');
+                    
+                    // Correctly identify the peer relative to the current student
+                    const peerId = c.student_id === studentId ? c.admin_id : c.student_id;
+                    const peerName = c.student_id === studentId ? c.admin_name : c.student_name;
+
                     return {
                       id: c.id,
                       studentId: c.student_id,
@@ -627,12 +688,19 @@ export const [MessagingProvider, useMessaging] = createContextHook(() => {
                       lastMessage: c.last_message || '',
                       lastMessageTime: new Date(c.last_message_time || Date.now()),
                       unreadCount: messages.filter(m => !m.read && m.senderId !== studentId).length,
-                      type: c.type || (c.admin_id === 'admin' ? 'admin' : 'peer'),
-                      participants: c.participants || []
+                      type: (c.admin_id === 'admin' || c.admin_id === 'ADMIN_ID') ? 'admin' : 'peer',
+                      participants: c.participants || [],
+                      peerProfileImageUrl: c.student_id === studentId ? c.admin_image_url : c.student_image_url,
+                      ...(isPeer && { peerId, peerName })
                     } as Conversation;
                   }));
 
-                  setConversations(convsWithMessages);
+                  // Use functional update to merge and deduplicate
+                  setConversations(prev => {
+                    const incomingIds = new Set(convsWithMessages.map(c => c.id));
+                    const existingOthers = prev.filter(c => !incomingIds.has(c.id));
+                    return [...existingOthers, ...convsWithMessages];
+                  });
                 }
               }
             }
@@ -669,6 +737,12 @@ export const [MessagingProvider, useMessaging] = createContextHook(() => {
 
           setupMessageListener(c.id);
           
+          const isPeer = c.type === 'peer' || (c.admin_id !== 'admin' && c.admin_id !== 'ADMIN_ID');
+          
+          // Correctly identify the peer relative to the current student
+          const peerId = c.student_id === studentId ? c.admin_id : c.student_id;
+          const peerName = c.student_id === studentId ? c.admin_name : c.student_name;
+
           return {
             id: c.id,
             studentId: c.student_id || studentId,
@@ -678,13 +752,20 @@ export const [MessagingProvider, useMessaging] = createContextHook(() => {
             messages,
             lastMessage: c.last_message || '',
             lastMessageTime: new Date(c.last_message_time || Date.now()),
-            unreadCount: messages.filter(m => !m.read && m.senderRole !== 'student').length,
-            type: c.admin_id === 'admin' ? 'admin' : 'peer',
-            participants: c.participants || []
+            unreadCount: messages.filter(m => !m.read && m.senderId !== studentId).length,
+            type: (c.admin_id === 'admin' || c.admin_id === 'ADMIN_ID') ? 'admin' : 'peer',
+            participants: c.participants || [],
+            peerProfileImageUrl: c.student_id === studentId ? c.admin_image_url : c.student_image_url,
+            ...(isPeer && { peerId, peerName })
           } as Conversation;
         }));
 
-        setConversations(convsWithMessages);
+        // Deduplicate and set
+        setConversations(prev => {
+          const incomingIds = new Set(convsWithMessages.map(c => c.id));
+          const existingOthers = prev.filter(c => !incomingIds.has(c.id));
+          return [...existingOthers, ...convsWithMessages];
+        });
       }
 
       return () => {

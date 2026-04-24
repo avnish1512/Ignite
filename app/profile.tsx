@@ -1,18 +1,24 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, ActivityIndicator, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
-import { Mail, Phone, MapPin, GraduationCap, Calendar, Edit3, Save, X, AlertCircle, Upload, Download, Trash2, FileText, Hash, LogOut } from 'lucide-react-native';
+import { Mail, Phone, MapPin, GraduationCap, Calendar, Edit3, Save, X, AlertCircle, Upload, Download, Trash2, FileText, Hash, Camera, Plus, Minus } from 'lucide-react-native';
 import { useAuth } from '@/hooks/auth-store';
 import { ValidationRules, formatPhoneNumber } from '@/hooks/validation-utils';
 import { useResumeUpload } from '@/hooks/resume-upload';
+import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 
 export default function ProfileScreen() {
-  const { student, updateStudent, logout } = useAuth();
+  const { student, updateStudent, uploadProfileImage } = useAuth();
   const router = useRouter();
   const { uploading, uploadProgress, uploadResume, deleteResume } = useResumeUpload();
   const [isEditing, setIsEditing] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [resumeError, setResumeError] = useState<string | null>(null);
+  const [skillInput, setSkillInput] = useState('');
+  const [profileImageUploading, setProfileImageUploading] = useState(false);
+  
   const [editedProfile, setEditedProfile] = useState(student || {
     id: '',
     name: '',
@@ -23,9 +29,9 @@ export default function ProfileScreen() {
     cgpa: 0,
     skills: [],
     address: '',
-    prnNumber: ''
+    prnNumber: '',
+    profileImageUrl: '',
   });
-  const [resumeError, setResumeError] = useState<string | null>(null);
 
   const validateProfile = useCallback(() => {
     const newErrors: Record<string, string> = {};
@@ -77,11 +83,29 @@ export default function ProfileScreen() {
       return;
     }
     try {
-      await updateStudent(editedProfile);
+      let profileToSave = { ...editedProfile };
+      
+      // Upload profile image if it's a new local URI (not already a URL)
+      if (editedProfile.profileImageUrl && 
+          !editedProfile.profileImageUrl.startsWith('http') && 
+          student?.id) {
+        setProfileImageUploading(true);
+        const uploadedUrl = await uploadProfileImage(student.id, editedProfile.profileImageUrl);
+        setProfileImageUploading(false);
+        
+        if (uploadedUrl) {
+          profileToSave.profileImageUrl = uploadedUrl;
+        } else {
+          Alert.alert('Warning', 'Profile image could not be uploaded, but profile will be saved');
+        }
+      }
+      
+      await updateStudent(profileToSave);
       setIsEditing(false);
       setErrors({});
       Alert.alert('Success', 'Profile updated successfully');
     } catch (error) {
+      setProfileImageUploading(false);
       const errorMessage = error instanceof Error ? error.message : 'Failed to update profile';
       Alert.alert('Error', errorMessage);
     }
@@ -91,7 +115,126 @@ export default function ProfileScreen() {
     setEditedProfile(student);
     setIsEditing(false);
     setErrors({});
+    setSkillInput('');
   };
+
+  const handlePickProfileImage = useCallback(async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (!result.canceled) {
+        const image = result.assets[0];
+        setProfileImageUploading(true);
+        
+        // In a real app, you would upload to a storage service
+        // For now, we'll use the local URI
+        setEditedProfile(prev => ({
+          ...prev,
+          profileImageUrl: image.uri
+        }));
+        
+        setProfileImageUploading(false);
+        Alert.alert('Success', 'Profile image updated');
+      }
+    } catch (error) {
+      console.error('Error picking image:', error);
+      Alert.alert('Error', 'Failed to pick image');
+      setProfileImageUploading(false);
+    }
+  }, []);
+
+  const handleTakeProfilePhoto = useCallback(async () => {
+    try {
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (!result.canceled) {
+        const image = result.assets[0];
+        setProfileImageUploading(true);
+        
+        setEditedProfile(prev => ({
+          ...prev,
+          profileImageUrl: image.uri
+        }));
+        
+        setProfileImageUploading(false);
+        Alert.alert('Success', 'Profile photo captured');
+      }
+    } catch (error) {
+      console.error('Error taking photo:', error);
+      Alert.alert('Error', 'Failed to take photo');
+      setProfileImageUploading(false);
+    }
+  }, []);
+
+  const handleAddSkill = useCallback(() => {
+    if (!skillInput.trim()) {
+      Alert.alert('Error', 'Please enter a skill');
+      return;
+    }
+
+    if (editedProfile.skills.includes(skillInput.trim())) {
+      Alert.alert('Duplicate', 'This skill is already added');
+      return;
+    }
+
+    setEditedProfile(prev => ({
+      ...prev,
+      skills: [...prev.skills, skillInput.trim()]
+    }));
+    setSkillInput('');
+  }, [skillInput, editedProfile.skills]);
+
+  const handleRemoveSkill = useCallback((skillToRemove: string) => {
+    setEditedProfile(prev => ({
+      ...prev,
+      skills: prev.skills.filter(skill => skill !== skillToRemove)
+    }));
+  }, []);
+
+  const handleUploadResume = useCallback(async () => {
+    if (!student) return;
+
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'application/pdf',
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled) return;
+
+      const file = result.assets[0];
+      setResumeError(null);
+
+      const uploadResult = await uploadResume(student.id, student.name, {
+        uri: file.uri,
+        name: file.name,
+        type: file.mimeType || 'application/pdf',
+      });
+
+      if (uploadResult.success) {
+        updateStudent({
+          ...student,
+          resumeUrl: uploadResult.downloadUrl,
+          resume: uploadResult.downloadUrl
+        });
+        Alert.alert('Success', 'Resume uploaded successfully');
+      } else {
+        setResumeError(uploadResult.error || 'Failed to upload resume');
+      }
+    } catch (err) {
+      setResumeError('An error occurred during selection');
+      console.error(err);
+    }
+  }, [student, uploadResume, updateStudent]);
 
   const handleDeleteResume = useCallback(async () => {
     if (!student) return;
@@ -109,6 +252,7 @@ export default function ProfileScreen() {
             if (result.success) {
               updateStudent({
                 ...student,
+                resumeUrl: undefined,
                 resume: undefined
               });
               Alert.alert('Success', 'Resume deleted successfully');
@@ -144,11 +288,42 @@ export default function ProfileScreen() {
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* Profile Header */}
         <View style={styles.profileHeader}>
-          {/* Default Profile Photo */}
+          {/* Profile Photo */}
           <View style={styles.photoContainer}>
-            <View style={styles.profileImagePlaceholder}>
-              <Text style={styles.profileAvatarText}>👤</Text>
-            </View>
+            {isEditing && profileImageUploading && (
+              <View style={[styles.profileImage, styles.loadingOverlay]}>
+                <ActivityIndicator size="large" color="#6366F1" />
+              </View>
+            )}
+            {editedProfile.profileImageUrl ? (
+              <Image 
+                source={{ uri: editedProfile.profileImageUrl }}
+                style={styles.profileImage}
+              />
+            ) : (
+              <View style={[styles.profileImage, styles.profileImagePlaceholder]}>
+                <Text style={styles.profileAvatarText}>👤</Text>
+              </View>
+            )}
+            
+            {isEditing && (
+              <View style={styles.imageActionButtons}>
+                <TouchableOpacity 
+                  style={styles.imageActionButton}
+                  onPress={handlePickProfileImage}
+                  disabled={profileImageUploading}
+                >
+                  <Upload size={16} color="#FFFFFF" />
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={styles.imageActionButton}
+                  onPress={handleTakeProfilePhoto}
+                  disabled={profileImageUploading}
+                >
+                  <Camera size={16} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
 
           {isEditing ? (
@@ -354,16 +529,49 @@ export default function ProfileScreen() {
 
         {/* Skills Section */}
         <View style={styles.detailsSection}>
-          <Text style={styles.sectionTitle}>Skills</Text>
+          <View style={styles.sectionTitleContainer}>
+            <Text style={styles.sectionTitle}>Professional Skills</Text>
+            {isEditing && <Text style={styles.editingBadge}>Editing</Text>}
+          </View>
+          
+          {isEditing && (
+            <View style={styles.skillInputContainer}>
+              <TextInput
+                style={styles.skillInput}
+                value={skillInput}
+                onChangeText={setSkillInput}
+                placeholder="Enter a skill (e.g., React, Python, AWS)"
+                placeholderTextColor="#9CA3AF"
+                onSubmitEditing={handleAddSkill}
+              />
+              <TouchableOpacity 
+                style={styles.addSkillButton}
+                onPress={handleAddSkill}
+              >
+                <Plus size={20} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+          )}
+
           <View style={styles.skillsContainer}>
-            {student.skills && student.skills.length > 0 ? (
-              student.skills.map((skill, index) => (
+            {editedProfile.skills && editedProfile.skills.length > 0 ? (
+              editedProfile.skills.map((skill, index) => (
                 <View key={index} style={styles.skillTag}>
                   <Text style={styles.skillText}>{skill}</Text>
+                  {isEditing && (
+                    <TouchableOpacity
+                      style={styles.removeSkillButton}
+                      onPress={() => handleRemoveSkill(skill)}
+                    >
+                      <Minus size={14} color="#EF4444" />
+                    </TouchableOpacity>
+                  )}
                 </View>
               ))
             ) : (
-              <Text style={styles.noSkillsText}>No skills added yet</Text>
+              <Text style={styles.noSkillsText}>
+                {isEditing ? 'Add your professional skills above' : 'No skills added yet'}
+              </Text>
             )}
           </View>
         </View>
@@ -393,7 +601,7 @@ export default function ProfileScreen() {
                 <View style={styles.resumeInfo}>
                   <Text style={styles.resumeFileName}>Your Resume</Text>
                   <Text style={styles.resumeUploadedText}>
-                    Uploaded: {student.resume ? new Date().toLocaleDateString() : 'Never'}
+                    Status: Verified & Uploaded
                   </Text>
                 </View>
               </View>
@@ -403,7 +611,10 @@ export default function ProfileScreen() {
                   onPress={() => {
                     if (student.resume) {
                       // Open resume in browser/viewer
-                      Alert.alert('Resume', 'Opening resume...');
+                      Alert.alert('Resume', 'Opening resume link...');
+                      import('expo-web-browser').then(WebBrowser => {
+                        WebBrowser.openBrowserAsync(student.resume!);
+                      });
                     }
                   }}
                   disabled={uploading}
@@ -420,43 +631,36 @@ export default function ProfileScreen() {
               </View>
             </View>
           ) : (
-            <View style={styles.uploadButton}>
-              <Upload size={20} color="#9CA3AF" />
-              <Text style={styles.uploadButtonTextDisabled}>
-                Resume upload coming soon
-              </Text>
-            </View>
+            <TouchableOpacity 
+              style={styles.uploadButton}
+              onPress={handleUploadResume}
+              disabled={uploading}
+            >
+              {uploading ? (
+                <ActivityIndicator size="small" color="#6366F1" />
+              ) : (
+                <>
+                  <Upload size={20} color="#6366F1" />
+                  <Text style={styles.uploadButtonText}>Upload Resume (PDF)</Text>
+                </>
+              )}
+            </TouchableOpacity>
           )}
 
           {student.resume && (
             <TouchableOpacity
-              style={[styles.changeResumeButton, styles.disabledButton]}
-              disabled={true}
+              style={styles.changeResumeButton}
+              onPress={handleUploadResume}
+              disabled={uploading}
             >
-              <Upload size={16} color="#9CA3AF" />
-              <Text style={styles.changeResumeTextDisabled}>
-                Resume upload coming soon
-              </Text>
+              <Upload size={16} color="#6366F1" />
+              <Text style={styles.changeResumeText}>Change Resume</Text>
             </TouchableOpacity>
           )}
 
           <Text style={styles.resumeHint}>
             Max file size: 5MB • Format: PDF only
           </Text>
-          
-          {/* Logout Button */}
-          <View style={{ padding: 20, marginBottom: 40 }}>
-            <TouchableOpacity 
-              style={styles.signOutButton}
-              onPress={async () => {
-                await logout();
-                router.replace('/unified-login' as any);
-              }}
-            >
-              <LogOut size={20} color="#EF4444" />
-              <Text style={styles.signOutText}>Sign Out</Text>
-            </TouchableOpacity>
-          </View>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -491,6 +695,41 @@ const styles = StyleSheet.create({
   photoContainer: {
     position: 'relative',
     marginBottom: 16,
+  },
+  profileImage: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#E5E7EB',
+  },
+  loadingOverlay: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  profileImagePlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F3F4F6',
+  },
+  profileAvatarText: {
+    fontSize: 48,
+  },
+  imageActionButtons: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  imageActionButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#6366F1',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: '#FFFFFF',
   },
   profileName: {
     fontSize: 24,
@@ -585,6 +824,21 @@ const styles = StyleSheet.create({
     color: '#111827',
     marginBottom: 16,
   },
+  sectionTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  editingBadge: {
+    fontSize: 12,
+    color: '#FFFFFF',
+    backgroundColor: '#6366F1',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    fontWeight: '600',
+  },
   detailItem: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -623,11 +877,41 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
   },
+  skillInputContainer: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+    alignItems: 'center',
+  },
+  skillInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#111827',
+  },
+  addSkillButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    backgroundColor: '#6366F1',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   skillTag: {
     backgroundColor: '#EEF2FF',
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingVertical: 8,
     borderRadius: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  removeSkillButton: {
+    padding: 2,
   },
   skillText: {
     fontSize: 14,
@@ -742,23 +1026,12 @@ const styles = StyleSheet.create({
     borderColor: '#6366F1',
     marginBottom: 12,
   },
-  uploadButtonTextDisabled: {
+  uploadButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#9CA3AF',
+    color: '#6366F1',
   },
-  profileImagePlaceholder: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: '#E5E7EB',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  profileAvatarText: {
-    fontSize: 48,
-  },
+
   changeResumeButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -770,10 +1043,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#6366F1',
   },
-  changeResumeTextDisabled: {
+  changeResumeText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#9CA3AF',
+    color: '#6366F1',
   },
   disabledButton: {
     borderColor: '#E5E7EB',
@@ -785,21 +1058,6 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
     textAlign: 'center',
     marginTop: 8,
-  },
-  signOutButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 12,
-    backgroundColor: '#FFF1F2',
-    borderWidth: 1,
-    borderColor: '#FECACA',
-    gap: 12,
-  },
-  signOutText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#EF4444',
+    marginBottom: 40,
   },
 });

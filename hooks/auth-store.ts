@@ -103,6 +103,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
                 year: studentData.year || '',
                 cgpa: studentData.cgpa || 0,
                 skills: studentData.skills || [],
+                profileImageUrl: studentData.profile_image_url || undefined,
                 profileCompleted: studentData.profile_completed || false,
               };
 
@@ -178,23 +179,25 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const logout = async () => {
     try {
       console.log('Initiating logout...');
-      // 1. Attempt server-side sign out (optional, might fail if already signed out or network issues)
+      
+      // 1. ABSOLUTELY clear local state immediately
+      setUser(null);
+      setSupabaseUser(null);
+      await AsyncStorage.removeItem('user');
+      
+      // 2. Attempt server-side sign out (ignore errors as session might already be dead)
       try {
+        await supabase.auth.signOut({ scope: 'local' }); // Force local cleanup
         await supabase.auth.signOut();
       } catch (err) {
         console.warn('Supabase signOut error (ignoring):', err);
       }
       
-      // 2. ABSOLUTELY clear local state regardless of server response
-      await AsyncStorage.removeItem('user');
-      setUser(null);
-      setSupabaseUser(null);
-      
       console.log('✅ Logout sequence complete');
     } catch (error) {
       console.error('Logout error:', error);
-      // Ensure we at least try to clear state to let user retry
       setUser(null);
+      setSupabaseUser(null);
     }
   };
 
@@ -244,18 +247,35 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
             year: updatedStudent.year,
             cgpa: updatedStudent.cgpa,
             skills: updatedStudent.skills,
+            profile_image_url: updatedStudent.profileImageUrl || null,
             profile_completed: updatedStudent.profileCompleted,
             updated_at: new Date().toISOString()
           })
           .eq('id', supabaseUser.id);
         
-        if (error) throw error;
+        if (error) {
+          // Log detailed error info
+          console.error('Supabase update error details:', {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+            hint: error.hint
+          });
+          throw error;
+        }
+
+
       } else {
         throw new Error('User not authenticated');
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to update student profile';
       console.error('Error updating student:', errorMessage);
+      
+      // Check if this is a column missing error
+      if (error instanceof Error && error.message.includes('profile_image_url')) {
+        console.error('⚠️ Database column missing: profile_image_url. Run MIGRATION_ADD_PROFILE_IMAGE_URL.sql in Supabase SQL Editor');
+      }
       throw error;
     }
   };
@@ -278,6 +298,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
             year: completedProfile.year,
             cgpa: completedProfile.cgpa,
             skills: completedProfile.skills,
+            profile_image_url: completedProfile.profileImageUrl || null,
             profile_completed: true,
             prn_number: completedProfile.prnNumber || null,
             enrollment_no: completedProfile.enrollmentNo || null,
@@ -286,13 +307,28 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           })
           .eq('id', supabaseUser.id);
         
-        if (error) throw error;
+        if (error) {
+          console.error('Supabase update error details:', {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+            hint: error.hint
+          });
+          throw error;
+        }
+
+
       } else {
         throw new Error('User not authenticated');
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to complete profile';
       console.error('Error completing profile:', errorMessage);
+      
+      // Check if this is a column missing error
+      if (error instanceof Error && error.message.includes('profile_image_url')) {
+        console.error('⚠️ Database column missing: profile_image_url. Run MIGRATION_ADD_PROFILE_IMAGE_URL.sql in Supabase SQL Editor');
+      }
       throw error;
     }
   };
@@ -312,6 +348,52 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
   }, []);
 
+  // Upload profile image to Supabase Storage
+  const uploadProfileImage = useCallback(async (studentId: string, imageUri: string): Promise<string | null> => {
+    try {
+      if (!imageUri) return null;
+      
+      // Fetch the image file
+      const response = await fetch(imageUri);
+      const blob = await response.blob();
+      
+      // Create a unique filename
+      const filename = `${studentId}_profile_${Date.now()}.jpg`;
+      const filePath = `profile-images/${filename}`;
+      
+      // Upload to Supabase Storage
+      const { error: uploadError, data } = await supabase.storage
+        .from('profile-photos')
+        .upload(filePath, blob, {
+          cacheControl: '3600',
+          upsert: true // Replace if exists
+        });
+      
+      if (uploadError) {
+        console.error('Error uploading profile image:', uploadError);
+        
+        // Check for specific storage errors
+        if (uploadError.message.includes('bucket not found') || uploadError.message.includes('Bucket not found')) {
+          console.error('⚠️ Supabase Storage bucket "profile-photos" not found. Please create it in Supabase dashboard.');
+        } else if (uploadError.message.includes('row-level security') || uploadError.message === 'New row violates row-level security policy') {
+          console.error('⚠️ RLS policy missing or restrictive for bucket "profile-photos".');
+        }
+        
+        return null;
+      }
+      
+      // Get public URL
+      const { data: publicUrlData } = supabase.storage
+        .from('profile-photos')
+        .getPublicUrl(filePath);
+      
+      return publicUrlData?.publicUrl || null;
+    } catch (error) {
+      console.error('Error in uploadProfileImage:', error);
+      return null;
+    }
+  }, []);
+
   return {
     user,
     student: user && 'course' in user ? user : null,
@@ -324,6 +406,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     updateStudent,
     completeProfile,
     getAvailableStudents,
+    uploadProfileImage,
     isAuthenticated: !!user,
     isAdmin: !!user && 'role' in user,
     isStudent: !!user && 'course' in user

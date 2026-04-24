@@ -50,7 +50,7 @@ export const DARK_THEME = {
   isDark:         true,
 } as const;
 
-export type Theme = typeof LIGHT_THEME;
+export type Theme = typeof LIGHT_THEME | typeof DARK_THEME;
 
 /** Returns the current theme colors, re-renders when dark mode changes. */
 export function useTheme(): Theme {

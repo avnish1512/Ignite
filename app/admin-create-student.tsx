@@ -54,20 +54,29 @@ export default function AdminCreateStudent() {
       const trimmedEmail = email.trim().toLowerCase();
       const trimmedName = name.trim();
 
-      let authResult = await supabase.auth.admin.createUser({
-        email: trimmedEmail,
-        password: password,
-        user_metadata: { name: trimmedName },
-        email_confirm: true
-      });
-
-      if (authResult.error?.status === 403) {
-        authResult = await silentAuth.signUp(trimmedEmail, password, trimmedName);
-      }
+      // Use signUp directly (doesn't require admin key like auth.admin.createUser)
+      const authResult = await silentAuth.signUp(trimmedEmail, password, trimmedName);
 
       if (authResult.error) throw authResult.error;
-      const newUid = authResult.data?.user?.id;
+      
+      // Get the user ID from the response
+      let newUid = authResult.data?.user?.id;
 
+      // Fallback: if ID not in response, try to fetch from students table by email
+      // (This requires an insert trigger or we need to handle it differently)
+      if (!newUid) {
+        console.warn('User ID not in signup response, using email as temporary identifier');
+        // In a real app, you'd have a database trigger that creates the student record
+        // For now, we'll use a temporary approach
+        newUid = authResult.data?.user?.id || trimmedEmail;
+      }
+
+      // Validate we have a valid ID
+      if (!newUid || newUid === trimmedEmail) {
+        throw new Error('Failed to retrieve user ID from authentication system. Please try again.');
+      }
+
+      // Insert student record in database
       const { error: insertError } = await supabase
         .from('students')
         .insert([{
@@ -79,9 +88,18 @@ export default function AdminCreateStudent() {
           created_at: new Date().toISOString(),
         }]);
 
-      if (insertError) throw insertError;
+      if (insertError) {
+        // If insert fails due to duplicate, it might mean the student was already created
+        if (insertError.message?.includes('duplicate') || insertError.message?.includes('unique')) {
+          console.log('Student record already exists');
+        } else {
+          throw insertError;
+        }
+      }
+      
       setCreated({ name: trimmedName, email: trimmedEmail, password });
     } catch (error: any) {
+      console.error('Create student error:', error);
       Alert.alert('Error', error.message || 'Failed to create account');
     } finally {
       setIsLoading(false);

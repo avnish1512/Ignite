@@ -62,7 +62,7 @@ export default function JobsScreen() {
     );
   }, [jobs, selectedTab, searchQuery, studentApplications]);
 
-  const renderJob = ({ item }: { item: Job }) => <JobCard job={item} />;
+  const renderJob = useCallback(({ item }: { item: Job }) => <JobCard job={item} />, []);
 
   if (isLoading) {
     return (
@@ -138,6 +138,11 @@ export default function JobsScreen() {
         keyExtractor={(item) => item.id}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.listContainer}
+        initialNumToRender={6}
+        maxToRenderPerBatch={4}
+        windowSize={5}
+        removeClippedSubviews={true}
+        getItemLayout={(_, index) => ({ length: 200, offset: 200 * index, index })}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>No opportunities found</Text>
@@ -146,7 +151,6 @@ export default function JobsScreen() {
             </Text>
           </View>
         }
-        // Force refresh when student changes
         extraData={student?.id}
       />
     </SafeAreaView>

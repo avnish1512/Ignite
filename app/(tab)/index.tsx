@@ -1,14 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Dimensions, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { Bell, FileText, Building2, TrendingUp, Flame } from 'lucide-react-native';
+import { Bell, FileText, Building2, TrendingUp, Flame, Sparkles, ChevronRight } from 'lucide-react-native';
 import { useAuth } from '@/hooks/auth-store';
 import { useJobs } from '@/hooks/jobs-store';
 import { useNotifications } from '@/hooks/notifications-store';
 import { useTheme } from '@/hooks/theme-store';
 import { formatSalaryLPA } from '@/hooks/salary-utils';
-import { capitalizeWords } from '@/hooks/text-utils';
+import { getDynamicGreeting, sanitizeText, capitalizeWords } from '@/hooks/text-utils';
 import { HomeSkeleton } from '@/components/SkeletonLoader';
 import { router } from 'expo-router';
 
@@ -17,10 +17,14 @@ const { width: screenWidth } = Dimensions.get('window');
 export default function HomeScreen() {
   const { student } = useAuth();
   const theme = useTheme();
-  const { jobs, isLoading, getApplicationsForStudent } = useJobs();
+  const { jobs, isLoading, getApplicationsForStudent, loadData } = useJobs();
   const { unreadCount, initializeNotifications } = useNotifications();
   const [applicationCount, setApplicationCount] = React.useState(0);
+  const [refreshing, setRefreshing] = React.useState(false);
   const styles = React.useMemo(() => makeStyles(theme), [theme]);
+
+  // Show only the 5 most recent jobs on the home screen
+  const recentJobs = React.useMemo(() => jobs.slice(0, 5), [jobs]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -33,6 +37,12 @@ export default function HomeScreen() {
       }
     }, [student?.id, initializeNotifications, getApplicationsForStudent])
   );
+
+  const onRefresh = React.useCallback(async () => {
+    setRefreshing(true);
+    await loadData();
+    setRefreshing(false);
+  }, [loadData]);
 
   if (!student) {
     return (
@@ -71,12 +81,18 @@ export default function HomeScreen() {
           <HomeSkeleton />
         </ScrollView>
       ) : (
-        <ScrollView showsVerticalScrollIndicator={false} style={styles.scrollView}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          style={styles.scrollView}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[theme.primary]} tintColor={theme.primary} />
+          }
+        >
           {/* Welcome Section */}
           <View style={styles.welcomeSection}>
-            <Text style={styles.welcomeText}>Welcome back,</Text>
+            <Text style={styles.welcomeText}>{getDynamicGreeting()},</Text>
             <Text style={styles.studentName}>{capitalizeWords(student.name)}</Text>
-            <Text style={styles.universityName}>Ignite</Text>
+            <Text style={styles.universityName}>Ignite Student Portal</Text>
           </View>
 
           {/* Stats Cards */}
@@ -98,12 +114,13 @@ export default function HomeScreen() {
             </View>
           </View>
 
+
           {/* Recent Updates Section - Real-time Jobs */}
           <View style={styles.updatesSection}>
             <Text style={styles.sectionTitle}>Recent Job Openings</Text>
             
-            {jobs.length > 0 ? (
-              jobs.map(job => (
+            {recentJobs.length > 0 ? (
+              recentJobs.map(job => (
                 <TouchableOpacity 
                   key={job.id}
                   style={styles.updateCard}
@@ -114,7 +131,9 @@ export default function HomeScreen() {
                   </View>
                   <View style={styles.updateContent}>
                     <Text style={styles.updateTitle}>{job.title} at {job.company}</Text>
-                    <Text style={styles.updateDescription}>{job.description || 'Position available for eligible candidates'}</Text>
+                    <Text style={styles.updateDescription} numberOfLines={2}>
+                      {sanitizeText(job.description, 'Position available for eligible candidates')}
+                    </Text>
                     <View style={styles.jobMetaInfo}>
                       <Text style={styles.location}>📍 {job.location}</Text>
                       <Text style={styles.salary}>💰 {formatSalaryLPA(job.ctc)}</Text>

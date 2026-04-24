@@ -5,12 +5,13 @@ import { Job } from '@/types/job';
 import { router } from 'expo-router';
 import { useTheme } from '@/hooks/theme-store';
 import { formatSalary } from '@/hooks/salary-utils';
+import { sanitizeText } from '@/hooks/text-utils';
 
 interface JobCardProps {
   job: Job;
 }
 
-export default function JobCard({ job }: JobCardProps) {
+function JobCardInner({ job }: JobCardProps) {
   const theme = useTheme();
   const styles = React.useMemo(() => makeStyles(theme), [theme]);
 
@@ -24,12 +25,15 @@ export default function JobCard({ job }: JobCardProps) {
   };
 
   const getDaysAgo = (date: string) => {
-    const now = new Date();
+    if (!date) return 'Recently';
     const posted = new Date(date);
+    if (isNaN(posted.getTime())) return 'Recently';
+    
+    const now = new Date();
     const diffTime = Math.abs(now.getTime() - posted.getTime());
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     
-    if (diffDays === 1) return '1 day ago';
+    if (diffDays <= 1) return 'Today';
     if (diffDays < 30) return `${diffDays} days ago`;
     if (diffDays < 365) return `${Math.floor(diffDays / 30)} month${Math.floor(diffDays / 30) > 1 ? 's' : ''} ago`;
     return `${Math.floor(diffDays / 365)} year${Math.floor(diffDays / 365) > 1 ? 's' : ''} ago`;
@@ -105,15 +109,20 @@ export default function JobCard({ job }: JobCardProps) {
 
       <View style={styles.footer}>
         <Text style={styles.deadline}>
-          Registrations closed on {new Date(job.registrationDeadline).toLocaleDateString('en-IN', {
-            day: 'numeric',
-            month: 'short',
-            year: 'numeric'
-          })} - {new Date(job.registrationDeadline).toLocaleTimeString('en-IN', {
-            hour: 'numeric',
-            minute: '2-digit',
-            hour12: true
-          })}
+          {(() => {
+            const deadline = new Date(job.registrationDeadline);
+            const isValid = !isNaN(deadline.getTime());
+            if (!isValid) return 'Open recruitment';
+            
+            const isFuture = deadline > new Date();
+            const label = isFuture ? 'Apply by' : 'Closed on';
+            const dateStr = deadline.toLocaleDateString('en-IN', {
+              day: 'numeric',
+              month: 'short',
+              year: 'numeric'
+            });
+            return `${label} ${dateStr}`;
+          })()}
         </Text>
         <View style={styles.footerActions}>
           <TouchableOpacity 
@@ -134,6 +143,8 @@ export default function JobCard({ job }: JobCardProps) {
     </TouchableOpacity>
   );
 }
+
+export default React.memo(JobCardInner);
 
 const { width: screenWidth } = Dimensions.get('window');
 const isTablet = screenWidth >= 768;

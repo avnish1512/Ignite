@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Stack } from 'expo-router';
+import { Stack, router } from 'expo-router';
 import { Bell, Briefcase, Calendar, Users, CheckCircle, X, Settings, Trash2 } from 'lucide-react-native';
 import { useAuth } from '@/hooks/auth-store';
 import { useNotifications } from '@/hooks/notifications-store';
@@ -184,11 +184,48 @@ export default function NotificationsScreen() {
               const IconComponent = getNotificationIcon(notification.type);
               const iconColor = getIconColor(notification.type);
               
+              const handleNotificationPress = () => {
+                // Mark as read
+                if (!notification.read) {
+                  markAsRead(notification.id);
+                }
+                
+                // Navigate based on notification type and data
+                if (notification.type === 'reminder' && notification.data?.jobId) {
+                  // Navigate to job details for deadline reminders
+                  router.push({
+                    pathname: '/job/[id]',
+                    params: { id: notification.data.jobId }
+                  });
+                } else if (notification.type === 'job' && notification.data?.jobId) {
+                  // Navigate to job details for job postings
+                  router.push({
+                    pathname: '/job/[id]',
+                    params: { id: notification.data.jobId }
+                  });
+                } else if (notification.type === 'application' && notification.data?.jobId) {
+                  // Navigate to applications screen for application updates
+                  router.push('/applications' as any);
+                } else if (notification.type === 'message' && notification.data?.conversationId) {
+                  // Navigate to messages screen with specific conversation
+                  router.push({
+                    pathname: '/(tab)/messages',
+                    params: { conversationId: notification.data.conversationId, senderName: notification.data.senderName }
+                  });
+                } else if (notification.type === 'message') {
+                  // Navigate to messages screen if no conversationId
+                  router.push('/(tab)/messages');
+                } else if (notification.data?.link) {
+                  // Custom navigation link if provided
+                  router.push(notification.data.link);
+                }
+              };
+              
               return (
                 <TouchableOpacity 
                   key={notification.id} 
                   style={[styles.notificationCard, !notification.read && styles.unreadCard]}
-                  onPress={() => !notification.read && markAsRead(notification.id)}
+                  onPress={handleNotificationPress}
                 >
                   <View style={styles.notificationContent}>
                     <View style={[styles.notificationIcon, { backgroundColor: iconColor + '20' }]}>

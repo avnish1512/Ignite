@@ -21,6 +21,7 @@ import { useCallback } from 'react';
 import { useAuth } from '@/hooks/auth-store';
 import { useJobs } from '@/hooks/jobs-store';
 import { supabase } from '@/config/supabase';
+import { formatSalaryLPA } from '@/hooks/salary-utils';
 
 export default function AdminDashboard() {
   const { admin, logout } = useAuth();
@@ -32,11 +33,17 @@ export default function AdminDashboard() {
     useCallback(() => {
       loadData();
       // Fetch real student count from Supabase
-      supabase
-        .from('students')
-        .select('id', { count: 'exact', head: true })
-        .then(({ count }) => setStudentCount(count || 0))
-        .catch(() => setStudentCount(0));
+      const fetchCount = async () => {
+        try {
+          const { count } = await supabase
+            .from('students')
+            .select('id', { count: 'exact', head: true });
+          setStudentCount(count || 0);
+        } catch {
+          setStudentCount(0);
+        }
+      };
+      fetchCount();
     }, [loadData])
   );
   
@@ -61,7 +68,7 @@ export default function AdminDashboard() {
           style: 'destructive',
           onPress: async () => {
             await logout();
-            router.replace('/unified-login' as any);
+            // Layout automatically redirects on auth state change
           }
         }
       ]
@@ -98,12 +105,7 @@ export default function AdminDashboard() {
     });
   };
 
-  const formatCTC = (ctc: { min: number; max: number }) => {
-    if (ctc.min === ctc.max) {
-      return `₹${(ctc.min / 100000).toFixed(1)} LPA`;
-    }
-    return `₹${(ctc.min / 100000).toFixed(1)} - ${(ctc.max / 100000).toFixed(1)} LPA`;
-  };
+
 
   const StatCard = ({ icon: Icon, title, value, color }: {
     icon: any;
@@ -282,7 +284,7 @@ export default function AdminDashboard() {
                   <View style={styles.jobDetails}>
                     <View style={styles.jobDetailItem}>
                       <Text style={styles.jobDetailLabel}>CTC:</Text>
-                      <Text style={styles.jobDetailValue}>{formatCTC(job.ctc)}</Text>
+                      <Text style={styles.jobDetailValue}>{formatSalaryLPA(job.ctc)}</Text>
                     </View>
                     <View style={styles.jobDetailItem}>
                       <Text style={styles.jobDetailLabel}>Type:</Text>

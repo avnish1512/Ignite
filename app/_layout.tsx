@@ -92,8 +92,6 @@ export default function RootLayout() {
 
   useEffect(() => {
     const initializeApp = async () => {
-      // Simulate app initialization time
-      await new Promise(resolve => setTimeout(resolve, 1500));
       setAppReady(true);
       SplashScreen.hideAsync();
     };

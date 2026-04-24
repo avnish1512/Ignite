@@ -10,10 +10,11 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Send, ArrowLeft, MessageSquare, Users, Plus } from 'lucide-react-native';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '@/hooks/auth-store';
 import { useMessaging, Conversation } from '@/hooks/messaging-store';
 import { useTheme } from '@/hooks/theme-store';
@@ -43,6 +44,7 @@ function ChatView({
   chatEmoji,
   isPeer,
   peerId,
+  profileImageUrl,
 }: {
   conversationId: string;
   onBack: () => void;
@@ -50,6 +52,7 @@ function ChatView({
   chatEmoji: string;
   isPeer: boolean;
   peerId?: string;
+  profileImageUrl?: string;
 }) {
   const theme = useTheme();
   const styles = React.useMemo(() => makeStyles(theme), [theme]);
@@ -105,8 +108,13 @@ function ChatView({
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
           <ArrowLeft size={22} color={theme.text} />
         </TouchableOpacity>
-        <View style={[styles.chatHeaderAvatar, isPeer && { backgroundColor: getAvatarColor(chatTitle) }]}>
-          {isPeer ? (
+        <View style={[styles.chatHeaderAvatar, !profileImageUrl && isPeer && { backgroundColor: getAvatarColor(chatTitle) }]}>
+          {profileImageUrl ? (
+            <Image
+              source={{ uri: profileImageUrl }}
+              style={styles.chatHeaderAvatarImage}
+            />
+          ) : isPeer ? (
             <Text style={styles.chatHeaderInitials}>{getInitials(chatTitle)}</Text>
           ) : (
             <Text style={styles.chatHeaderAvatarText}>{chatEmoji}</Text>
@@ -214,12 +222,14 @@ export default function MessagesScreen() {
   const styles = React.useMemo(() => makeStyles(theme), [theme]);
   const { student } = useAuth();
   const { conversations, getStudentConversation, loadStudentConversations } = useMessaging();
+  const { conversationId, senderName } = useLocalSearchParams<{ conversationId?: string; senderName?: string }>();
   const [activeConversation, setActiveConversation] = useState<{
     id: string;
     title: string;
     emoji: string;
     isPeer: boolean;
     peerId?: string;
+    profileImageUrl?: string;
   } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -253,6 +263,53 @@ export default function MessagesScreen() {
     });
   }, [conversations, student?.id]);
 
+  // Handle opening conversation from notification/params
+  useEffect(() => {
+    if (conversationId) {
+      const openConv = () => {
+        const conv = conversations.find(c => c.id === conversationId);
+        if (conv) {
+          const isPeer = (conv.adminId !== 'admin' && conv.adminId !== 'ADMIN_ID');
+          const title = isPeer ? (conv.peerName || conv.adminName || 'Student') : 'Placement Admin';
+          const emoji = isPeer ? '' : '👨‍💼';
+          
+          setActiveConversation({
+            id: conv.id,
+            title,
+            emoji,
+            isPeer,
+            peerId: conv.peerId,
+            profileImageUrl: isPeer ? conv.peerProfileImageUrl : undefined
+          });
+        }
+      };
+
+      if (conversations.length > 0) {
+        openConv();
+      }
+    }
+  }, [conversationId, conversations.length > 0]);
+
+  // Keep activeConversation title and profile image in sync if conversation updates in the background
+  useEffect(() => {
+    if (activeConversation) {
+      const conv = conversations.find(c => c.id === activeConversation.id);
+      if (conv) {
+        const isPeer = conv.type === 'peer';
+        const newTitle = isPeer ? (conv.peerName || 'Student') : 'Placement Admin';
+        const newProfileImage = isPeer ? conv.peerProfileImageUrl : undefined;
+        
+        if (activeConversation.title !== newTitle || activeConversation.profileImageUrl !== newProfileImage) {
+          setActiveConversation(prev => prev ? {
+            ...prev,
+            title: newTitle,
+            profileImageUrl: newProfileImage
+          } : null);
+        }
+      }
+    }
+  }, [conversations, activeConversation]);
+
   // ── Showing chat view ─────────────────────────────────────
   if (activeConversation) {
     return (
@@ -264,6 +321,7 @@ export default function MessagesScreen() {
           chatEmoji={activeConversation.emoji}
           isPeer={activeConversation.isPeer}
           peerId={activeConversation.peerId}
+          profileImageUrl={activeConversation.profileImageUrl}
         />
       </SafeAreaView>
     );
@@ -271,9 +329,9 @@ export default function MessagesScreen() {
 
   // ── Helper: get display info for a conversation ─────────────
   const getConvDisplay = (conv: Conversation) => {
-    const isPeer = conv.type === 'peer';
+    const isPeer = (conv.adminId !== 'admin' && conv.adminId !== 'ADMIN_ID');
     if (isPeer) {
-      // Find the other person's name
+      // Find the other person's name - prefer peerName
       const otherName = conv.peerName || conv.adminName || 'Student';
       return {
         name: capitalizeWords(otherName),
@@ -282,7 +340,7 @@ export default function MessagesScreen() {
         color: getAvatarColor(otherName),
         subtitle: 'Student',
         isPeer: true,
-        peerId: conv.peerId || conv.adminId,
+        peerId: conv.peerId,
       };
     }
     return {
@@ -536,6 +594,11 @@ function makeStyles(theme: ReturnType<typeof useTheme>) {
       backgroundColor: theme.primaryLight, alignItems: 'center', justifyContent: 'center',
     },
     chatHeaderAvatarText: { fontSize: 20 },
+    chatHeaderAvatarImage: {
+      width: '100%',
+      height: '100%',
+      borderRadius: 19,
+    },
     chatHeaderInitials: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
     chatHeaderTitle: { fontSize: 15, fontWeight: '700', color: theme.text },
     chatHeaderSubtitle: { fontSize: 11, color: theme.textMuted, marginTop: 1 },

@@ -118,15 +118,16 @@ export const [JobsProvider, useJobs] = createContextHook(() => {
         return { success: false, error: 'Missing job ID or student ID' };
       }
 
-      console.log('Attempting to apply to job:', { jobId, studentId });
+      // Force unique but deterministic ID per student per job (with timestamp for re-applications if allowed)
+      const applicationId = `${studentId}_${jobId}`;
 
       const newApplication: Application = {
-        id: `${studentId}_${jobId}_${Date.now()}`,
+        id: applicationId,
         jobId,
         studentId,
-        studentName: studentData?.name || '',
+        studentName: studentData?.name || 'Unknown student',
         studentEmail: studentData?.email || '',
-        studentCGPA: studentData?.cgpa || null,
+        studentCGPA: typeof studentData?.cgpa === 'string' ? parseFloat(studentData.cgpa) : (studentData?.cgpa || 0),
         studentCourse: studentData?.course || '',
         studentYear: studentData?.year || '',
         studentResume: studentData?.resume || '',
@@ -135,10 +136,12 @@ export const [JobsProvider, useJobs] = createContextHook(() => {
         lastUpdated: new Date().toISOString()
       };
 
+      console.log('Sending application to Supabase:', newApplication);
+
       // Save to Supabase - convert camelCase to snake_case
       const { error } = await supabase
         .from('applications')
-        .insert([{
+        .upsert([{
           id: newApplication.id,
           job_id: newApplication.jobId,
           student_id: newApplication.studentId,
@@ -150,16 +153,18 @@ export const [JobsProvider, useJobs] = createContextHook(() => {
           student_resume: newApplication.studentResume,
           status: newApplication.status,
           applied_date: newApplication.appliedDate,
-          last_updated: newApplication.lastUpdated,
-          created_at: new Date().toISOString()
+          last_updated: newApplication.lastUpdated
         }]);
       
-      if (error) throw error;
-      console.log('Application saved to Supabase:', newApplication.id);
+      if (error) {
+        console.error('Supabase application error:', error);
+        throw error;
+      }
+      console.log('✅ Application saved successfully');
 
       return { success: true };
     } catch (error: any) {
-      console.error('Error applying to job:', error.message);
+      console.error('❌ Error applying to job:', error);
       
       let errorMsg = 'Failed to apply to job';
       if (error.message?.includes('permission')) {
@@ -523,6 +528,84 @@ export const [JobsProvider, useJobs] = createContextHook(() => {
   const getJobsByCompany = useCallback((companyName: string) => 
     jobs.filter(job => job.company.toLowerCase().includes(companyName.toLowerCase())), [jobs]);
 
+  // Check job deadlines and handle notifications/deletions
+  const checkJobDeadlines = useCallback(async () => {
+    try {
+      const now = new Date();
+      const nowTime = now.getTime();
+      
+      for (const job of jobs) {
+        if (!job.registrationDeadline) continue;
+        
+        const deadlineDate = new Date(job.registrationDeadline);
+        const deadlineTime = deadlineDate.getTime();
+        const oneDayInMs = 24 * 60 * 60 * 1000;
+        const oneHourInMs = 60 * 60 * 1000; // To check if we already notified today
+        
+        // Check if deadline has passed - delete the job
+        if (nowTime > deadlineTime) {
+          console.log(`Deleting expired job: ${job.title}`);
+          await deleteJob(job.id);
+        }
+        // Check if deadline is within next 24 hours - send notifications to all students who applied
+        else if (nowTime > (deadlineTime - oneDayInMs) && nowTime < (deadlineTime - oneDayInMs + oneHourInMs)) {
+          console.log(`Sending deadline reminder for job: ${job.title}`);
+          
+          // Get all students who applied to this job
+          const jobApplications = applications.filter(app => app.jobId === job.id);
+          
+          // Create notifications for each student who applied
+          const { createNotification } = require('@/hooks/notifications-store');
+          
+          for (const application of jobApplications) {
+            try {
+              const hoursRemaining = Math.round((deadlineTime - nowTime) / (60 * 60 * 1000));
+              
+              // Create notification in Supabase
+              const { error } = await supabase
+                .from('notifications')
+                .insert({
+                  user_id: application.studentId,
+                  type: 'reminder',
+                  title: `Deadline Reminder - ${job.title}`,
+                  message: `The deadline for ${job.title} at ${job.company} expires in approximately ${hoursRemaining} hours. Submit your application now!`,
+                  read: false,
+                  data: {
+                    jobId: job.id,
+                    jobTitle: job.title,
+                    company: job.company,
+                    deadline: job.registrationDeadline
+                  },
+                  created_at: new Date().toISOString()
+                });
+              
+              if (error) {
+                console.error(`Failed to create notification for student ${application.studentId}:`, error);
+              }
+            } catch (err) {
+              console.error(`Error creating notification for student:`, err);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error checking job deadlines:', error);
+    }
+  }, [jobs, applications, deleteJob]);
+
+  // Check deadlines on app load and periodically
+  useEffect(() => {
+    // Check immediately on load
+    checkJobDeadlines();
+    
+    // Check every hour
+    const interval = setInterval(() => {
+      checkJobDeadlines();
+    }, 60 * 60 * 1000); // 1 hour
+    
+    return () => clearInterval(interval);
+  }, [checkJobDeadlines]);
+
   return useMemo(() => ({
     jobs,
     applications,
@@ -542,7 +625,8 @@ export const [JobsProvider, useJobs] = createContextHook(() => {
     loadCompanies,
     addCompany,
     updateCompany,
-    deleteCompany
+    deleteCompany,
+    checkJobDeadlines
   }), [
     jobs,
     applications,
@@ -562,6 +646,7 @@ export const [JobsProvider, useJobs] = createContextHook(() => {
     loadCompanies,
     addCompany,
     updateCompany,
-    deleteCompany
+    deleteCompany,
+    checkJobDeadlines
   ]);
 });

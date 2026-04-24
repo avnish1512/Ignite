@@ -229,7 +229,7 @@ export const [NotificationsProvider, useNotifications] = createContextHook(() =>
           'job',
           'New Job Opportunity',
           `${companyName} has posted a new position: ${jobTitle}`,
-          { jobId, companyName }
+          { jobId, jobTitle, companyName }
         );
       }
     } catch (error) {
@@ -242,7 +242,8 @@ export const [NotificationsProvider, useNotifications] = createContextHook(() =>
     studentId: string,
     status: string,
     jobTitle: string,
-    companyName: string
+    companyName: string,
+    jobId?: string
   ) => {
     const statusMessages = {
       'Applied': 'Your application has been received.',
@@ -259,21 +260,23 @@ export const [NotificationsProvider, useNotifications] = createContextHook(() =>
       'application',
       `Application Status: ${status}`,
       `${companyName} - ${jobTitle}: ${message}`,
-      { status, jobTitle, companyName }
+      { status, jobTitle, companyName, jobId }
     );
   }, [createNotification]);
 
   // Trigger when student receives a message
   const triggerMessageNotification = useCallback(async (
     studentId: string,
-    senderName: string
+    senderName: string,
+    conversationId?: string,
+    senderId?: string
   ) => {
     await createNotification(
       studentId,
       'message',
       'New Message',
       `You have a new message from ${senderName}`,
-      { senderName }
+      { senderName, conversationId, senderId }
     );
   }, [createNotification]);
 

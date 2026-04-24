@@ -9,25 +9,50 @@
  */
 function formatAmount(amount: number): string {
   if (!amount || isNaN(amount) || amount <= 0) return '0';
+  
+  // If amount is very small (e.g. < 100), assume it might already be in LPA format
+  // or it's a raw small number. We show it with 1 decimal place.
+  if (amount < 100) return amount.toFixed(1);
+
   if (amount >= 10000000) return `${(amount / 10000000).toFixed(1)}Cr`;
   if (amount >= 100000) return `${(amount / 100000).toFixed(1)}L`;
   if (amount >= 1000) return `${(amount / 1000).toFixed(0)}K`;
-  return `₹${amount}`;
+  return `${amount}`;
+}
+
+function normalizeCTC(ctc: any): any {
+  if (typeof ctc === 'string') {
+    try {
+      const trimmed = ctc.trim();
+      if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+        return JSON.parse(trimmed);
+      }
+    } catch (e) {
+      // Ignore JSON parse errors
+    }
+  }
+  return ctc;
 }
 
 /**
  * Returns a formatted CTC string for display on cards and detail pages.
- * Handles all possible shapes of the CTC field from Firestore.
- *
- * @example
- *   formatSalary(null)                    → "Competitive"
- *   formatSalary({ min: 500000, max: 1200000 }) → "INR 5.0L - 12.0L"
- *   formatSalary({ min: 800000, max: 800000 })  → "INR 8.0L"
- *   formatSalary("10 LPA")               → "10 LPA"
+ * Handles all possible shapes of the CTC field.
  */
-export function formatSalary(ctc: any): string {
-  if (!ctc) return 'Competitive';
-  if (typeof ctc === 'string') return ctc;
+export function formatSalary(ctcRaw: any): string {
+  if (!ctcRaw) return 'Competitive';
+  
+  const ctc = normalizeCTC(ctcRaw);
+
+  if (typeof ctc === 'number') {
+    return `INR ${formatAmount(ctc)}${ctc < 100 ? ' LPA' : ''}`;
+  }
+  
+  // If it's a string, return it but remove "none" placeholders
+  if (typeof ctc === 'string') {
+    const trimmed = ctc.trim().toLowerCase();
+    if (trimmed === 'none' || trimmed === 'n/a') return 'Competitive';
+    return ctc;
+  }
 
   if (typeof ctc === 'object' && ctc !== null) {
     const min = Number(ctc.min);
@@ -39,13 +64,16 @@ export function formatSalary(ctc: any): string {
     }
 
     // Only one valid
-    if (isNaN(min) || min <= 0) return `INR ${formatAmount(max)}`;
-    if (isNaN(max) || max <= 0) return `INR ${formatAmount(min)}`;
+    if (isNaN(min) || min <= 0) return `INR ${formatAmount(max)}${max < 100 ? ' LPA' : ''}`;
+    if (isNaN(max) || max <= 0) return `INR ${formatAmount(min)}${min < 100 ? ' LPA' : ''}`;
 
     // Both valid
-    return min === max
-      ? `INR ${formatAmount(min)}`
-      : `INR ${formatAmount(min)} - ${formatAmount(max)}`;
+    if (min === max) {
+      return `INR ${formatAmount(min)}${min < 100 ? ' LPA' : ''}`;
+    }
+    
+    const suffix = (min < 100 || max < 100) ? ' LPA' : '';
+    return `INR ${formatAmount(min)} - ${formatAmount(max)}${suffix}`;
   }
 
   return 'Competitive';
@@ -53,15 +81,24 @@ export function formatSalary(ctc: any): string {
 
 /**
  * Formats CTC for inline short display (e.g. home screen job list).
- * Returns "₹X.X - Y.Y LPA" format or fallback.
- *
- * @example
- *   formatSalaryLPA(null)                         → "Competitive"
- *   formatSalaryLPA({ min: 500000, max: 1200000}) → "₹5.0 - 12.0 LPA"
  */
-export function formatSalaryLPA(ctc: any): string {
-  if (!ctc) return 'Competitive';
-  if (typeof ctc === 'string') return ctc;
+export function formatSalaryLPA(ctcRaw: any): string {
+  if (!ctcRaw) return 'Competitive';
+  
+  const ctc = normalizeCTC(ctcRaw);
+
+  if (typeof ctc === 'number') {
+    if (ctc < 100) return `₹${ctc.toFixed(1)} LPA`;
+    const lpa = ctc / 100000;
+    if (lpa < 0.1) return `₹${formatAmount(ctc)}`;
+    return `₹${lpa.toFixed(1)} LPA`;
+  }
+
+  if (typeof ctc === 'string') {
+    const trimmed = ctc.trim().toLowerCase();
+    if (trimmed === 'none' || trimmed === 'n/a') return 'Competitive';
+    return ctc;
+  }
 
   if (typeof ctc === 'object' && ctc !== null) {
     const min = Number(ctc.min);
@@ -71,14 +108,22 @@ export function formatSalaryLPA(ctc: any): string {
       return 'Competitive';
     }
 
-    const minLPA = !isNaN(min) && min > 0 ? (min / 100000).toFixed(1) : null;
-    const maxLPA = !isNaN(max) && max > 0 ? (max / 100000).toFixed(1) : null;
+    // Handle small numbers gracefully without returning "0.0 LPA"
+    const formatLPAValue = (val: number) => {
+      if (val < 100) return `${val.toFixed(1)} LPA`;
+      const lpa = val / 100000;
+      if (lpa < 0.1) return formatAmount(val);
+      return `${lpa.toFixed(1)} LPA`;
+    };
+
+    const minLPA = !isNaN(min) && min > 0 ? formatLPAValue(min) : null;
+    const maxLPA = !isNaN(max) && max > 0 ? formatLPAValue(max) : null;
 
     if (minLPA && maxLPA) {
-      return minLPA === maxLPA ? `₹${minLPA} LPA` : `₹${minLPA} - ${maxLPA} LPA`;
+      return minLPA === maxLPA ? `₹${minLPA}` : `₹${minLPA} - ${maxLPA}`;
     }
-    if (minLPA) return `₹${minLPA} LPA`;
-    if (maxLPA) return `₹${maxLPA} LPA`;
+    if (minLPA) return `₹${minLPA}`;
+    if (maxLPA) return `₹${maxLPA}`;
   }
 
   return 'Competitive';

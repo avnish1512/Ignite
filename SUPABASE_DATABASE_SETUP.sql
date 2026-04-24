@@ -22,6 +22,7 @@ create table if not exists students (
   address text,
   profile_photo text,
   profile_photo_path text,
+  profile_image_url text,
   profile_completed boolean default false,
   prn_number text,
   enrollment_no text,
@@ -99,6 +100,8 @@ create table if not exists conversations (
   student_name text,
   admin_id text,
   admin_name text,
+  student_image_url text,
+  admin_image_url text,
   participants text[] default '{}',
   last_message text,
   last_message_time text,
@@ -204,11 +207,20 @@ create policy "Allow all access for authenticated users" on settings
 -- Enable Realtime for relevant tables
 -- ============================================================================
 
-alter publication supabase_realtime add table jobs;
-alter publication supabase_realtime add table applications;
-alter publication supabase_realtime add table conversations;
-alter publication supabase_realtime add table messages;
-alter publication supabase_realtime add table notifications;
+DO $$ 
+DECLARE
+  t text;
+BEGIN
+  FOR t IN SELECT unnest(ARRAY['jobs', 'applications', 'conversations', 'messages', 'notifications']) LOOP
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_publication_tables 
+      WHERE pubname = 'supabase_realtime' AND tablename = t
+    ) THEN
+      EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE %I', t);
+    END IF;
+  END LOOP;
+END $$;
+
 
 -- ============================================================================
 -- SUCCESS! All tables created.

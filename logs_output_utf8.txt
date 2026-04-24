@@ -1,0 +1,20 @@
+﻿node.exe : open C:\Users\avnis\.supabase\profile: The system cannot find the file specified.
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (open C:\Users\a...file specified.:String) [], Remo 
+   teException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Using access token for profile: supabase
+Loading project ref from file: supabase\.temp\project-ref
+Supabase CLI 2.93.0
+Using profile: supabase (supabase.co)
+WARNING: Docker is not running
+Using access token for profile: supabase
+2026/04/21 23:47:51 HTTP POST: https://api.supabase.com/v1/projects/yhcvbhxsxloytkkztwyn/functio
+ns/deploy?slug=chat-with-ignite-ai
+Uploading asset (chat-with-ignite-ai): supabase/functions/chat-with-ignite-ai/index.ts
+Deployed Functions on project yhcvbhxsxloytkkztwyn: chat-with-ignite-ai
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/yhcvbhxsxloytkkztwyn/functions
+2026/04/21 23:47:54 HTTP POST: https://eu.i.posthog.com/batch/

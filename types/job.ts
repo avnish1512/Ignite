@@ -48,7 +48,9 @@ export interface Student {
   year: string;
   cgpa: number;
   skills: string[];
-  resume?: string;
+  profileImageUrl?: string;      // New: Profile image URL
+  resumeUrl?: string;            // Standardized resume URL field
+  resume?: string;               // Legacy field (kept for compatibility)
   resumePath?: string;
   resumeFileName?: string;
   resumeUploadedDate?: Date;
@@ -56,8 +58,8 @@ export interface Student {
   profilePhoto?: string;
   profilePhotoPath?: string;
   profileCompleted?: boolean;
-  prnNumber?: string;        // PRN / Roll number
-  enrollmentNo?: string;     // Enrollment / registration number
+  prnNumber?: string;            // PRN / Roll number
+  enrollmentNo?: string;         // Enrollment / registration number
   isActive?: boolean;
   createdAt?: string;
   createdBy?: string;

@@ -286,7 +286,7 @@ export default function SettingsScreen() {
   const handlePrivacyPolicy = () => {
     Alert.alert(
       'Privacy & Security',
-      'Your data is secured with Firebase Authentication and stored in encrypted Firestore.\n\n• Passwords are hashed by Firebase Auth\n• Data is never shared with third parties\n• You can delete your account anytime\n• Messages are stored encrypted in Firestore',
+      'Your data is secured with Supabase Authentication and stored in a secure PostgreSQL database.\n\n• Passwords are hashed and salted by Supabase Auth\n• Data is never shared with third parties\n• You can delete your account anytime\n• Messages are stored securely in Supabase\n• Row Level Security (RLS) policies protect your data',
       [{ text: 'OK' }]
     );
   };
@@ -300,11 +300,12 @@ export default function SettingsScreen() {
   };
 
   if (!student) {
+    const s = makeStyles(theme);
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+      <SafeAreaView style={[s.container, { backgroundColor: theme.background }]}>
         <Stack.Screen options={{ title: 'Settings' }} />
-        <View style={styles.emptyState}>
-          <Text style={[styles.emptyTitle, { color: theme.text }]}>Please login to access settings</Text>
+        <View style={s.emptyState}>
+          <Text style={[s.emptyTitle, { color: theme.text }]}>Please login to access settings</Text>
         </View>
       </SafeAreaView>
     );
